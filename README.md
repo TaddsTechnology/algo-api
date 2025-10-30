@@ -6,7 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: High-performance algorithmic trading API with specialized futures endpoints and formula calculations
+short_description: Algorithmic trading API with futures data endpoints
 ---
 
 # 🚀 Enhanced Algo Trading Market Data API
