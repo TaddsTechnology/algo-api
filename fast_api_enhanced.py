@@ -129,7 +129,7 @@ async def update_current_futures():
     """Background task to update current futures data"""
     while True:
         try:
-            data = current_futures.fetch_live_data(use_ltp_only=False, limit_contracts=50)
+            data = current_futures.fetch_live_data(use_ltp_only=False, limit_contracts=None)
             current_futures_store.update_data(data)
             await asyncio.sleep(0.5)  # Fast 0.5s refresh for current futures
         except Exception as e:
@@ -140,7 +140,7 @@ async def update_near_futures():
     """Background task to update near futures data"""
     while True:
         try:
-            data = near_futures.fetch_live_data(use_ltp_only=False, limit_contracts=40)
+            data = near_futures.fetch_live_data(use_ltp_only=False, limit_contracts=None)
             near_futures_store.update_data(data)
             await asyncio.sleep(1.0)  # 1s refresh for near futures
         except Exception as e:
@@ -151,7 +151,7 @@ async def update_far_futures():
     """Background task to update far futures data"""
     while True:
         try:
-            data = far_futures.fetch_live_data(use_ltp_only=False, limit_contracts=30)
+            data = far_futures.fetch_live_data(use_ltp_only=False, limit_contracts=None)
             far_futures_store.update_data(data)
             await asyncio.sleep(1.5)  # 1.5s refresh for far futures
         except Exception as e:
