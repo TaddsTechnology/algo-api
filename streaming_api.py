@@ -168,19 +168,42 @@ async def startup_event():
 @app.get("/api/all-futures-combined")
 async def get_all_futures():
     """Get all futures data (optimized single endpoint)"""
-    all_data = cache.get_all()
-    return {
-        "success": True,
-        "data": all_data,
-        "timestamp": all_data["timestamp"],
-        "data_age_seconds": time.time() - all_data["timestamp"],
-        "counts": {
-            "current": len(all_data["current"]),
-            "near": len(all_data["near"]),
-            "far": len(all_data["far"])
-        },
-        "status": "ready" if len(all_data["current"]) > 0 else "loading"
-    }
+    try:
+        all_data = cache.get_all()
+        timestamp = all_data.get("timestamp", time.time())
+        current_data = all_data.get("current", {})
+        near_data = all_data.get("near", {})
+        far_data = all_data.get("far", {})
+        
+        return {
+            "success": True,
+            "data": {
+                "current": current_data,
+                "near": near_data,
+                "far": far_data,
+                "timestamp": timestamp
+            },
+            "timestamp": timestamp,
+            "data_age_seconds": time.time() - timestamp,
+            "counts": {
+                "current": len(current_data),
+                "near": len(near_data),
+                "far": len(far_data)
+            },
+            "status": "ready" if len(current_data) > 0 else "loading"
+        }
+    except Exception as e:
+        print(f"❌ Error in get_all_futures: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "data": {"current": {}, "near": {}, "far": {}, "timestamp": time.time()},
+            "timestamp": time.time(),
+            "counts": {"current": 0, "near": 0, "far": 0},
+            "status": "error"
+        }
 
 @app.get("/api/current-futures")
 async def get_current_futures():
