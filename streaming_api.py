@@ -80,18 +80,32 @@ def get_api_credentials():
     
     return api_key, access_token
 
+# Initialize fetchers with error handling
+current_futures = None
+near_futures = None
+far_futures = None
+
 try:
     api_key, access_token = get_api_credentials()
-    current_futures = KiteCurrentFutures(api_key, access_token)
-    near_futures = KiteNearFutures(api_key, access_token)
-    far_futures = KiteFarFutures(api_key, access_token)
-    print("✅ API fetchers initialized")
+    if api_key and access_token:
+        current_futures = KiteCurrentFutures(api_key, access_token)
+        near_futures = KiteNearFutures(api_key, access_token)
+        far_futures = KiteFarFutures(api_key, access_token)
+        print("✅ API fetchers initialized successfully")
+    else:
+        print("⚠️ Missing API credentials - will return empty data")
 except Exception as e:
-    print(f"❌ Error initializing: {e}")
+    print(f"❌ Error initializing fetchers: {e}")
+    print("⚠️ API will start but data fetching may fail")
 
 # Background task to continuously fetch data
 async def continuous_data_fetcher():
     """Continuously fetch market data in background"""
+    # Check if fetchers are initialized
+    if not current_futures or not near_futures or not far_futures:
+        print("❌ Fetchers not initialized - skipping data fetch")
+        return
+    
     # Start with lighter load - only popular contracts initially
     first_fetch = True
     
@@ -140,10 +154,15 @@ async def continuous_data_fetcher():
 @app.on_event("startup")
 async def startup_event():
     """Start background data fetcher"""
-    # Start fetcher without blocking startup
-    asyncio.create_task(continuous_data_fetcher())
-    print("🚀 API ready - data fetcher running in background")
-    print("⚡ First data will be available in ~5 seconds")
+    print("🚀 Starting API...")
+    try:
+        # Start fetcher without blocking startup
+        asyncio.create_task(continuous_data_fetcher())
+        print("✅ API ready - data fetcher running in background")
+        print("⚡ First data will be available in ~5-10 seconds")
+    except Exception as e:
+        print(f"⚠️ Error starting data fetcher: {e}")
+        print("🚨 API will still respond but data may be empty initially")
 
 # REST API endpoints
 @app.get("/api/all-futures-combined")
