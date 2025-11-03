@@ -92,17 +92,23 @@ except Exception as e:
 # Background task to continuously fetch data
 async def continuous_data_fetcher():
     """Continuously fetch market data in background"""
+    # Start with lighter load - only popular contracts initially
+    first_fetch = True
+    
     while True:
         try:
+            # Use limit on first fetch to start faster, then fetch all
+            limit = 50 if first_fetch else None
+            
             # Fetch all categories in parallel
             current_task = asyncio.create_task(
-                asyncio.to_thread(current_futures.fetch_live_data, use_ltp_only=False, limit_contracts=None)
+                asyncio.to_thread(current_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
             )
             near_task = asyncio.create_task(
-                asyncio.to_thread(near_futures.fetch_live_data, use_ltp_only=False, limit_contracts=None)
+                asyncio.to_thread(near_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
             )
             far_task = asyncio.create_task(
-                asyncio.to_thread(far_futures.fetch_live_data, use_ltp_only=False, limit_contracts=None)
+                asyncio.to_thread(far_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
             )
             
             # Wait for all to complete
@@ -120,7 +126,12 @@ async def continuous_data_fetcher():
             
             print(f"✅ Updated at {datetime.now().strftime('%H:%M:%S')} - Current: {len(current_data) if not isinstance(current_data, Exception) else 0}, Near: {len(near_data) if not isinstance(near_data, Exception) else 0}, Far: {len(far_data) if not isinstance(far_data, Exception) else 0}")
             
-            await asyncio.sleep(1)  # Update every 1 second
+            # After first fetch, fetch all contracts
+            if first_fetch:
+                first_fetch = False
+                await asyncio.sleep(0.5)  # Quick refresh to get all contracts
+            else:
+                await asyncio.sleep(2)  # Update every 2 seconds for all contracts
             
         except Exception as e:
             print(f"⚠️ Error in fetcher: {e}")
@@ -129,8 +140,10 @@ async def continuous_data_fetcher():
 @app.on_event("startup")
 async def startup_event():
     """Start background data fetcher"""
+    # Start fetcher without blocking startup
     asyncio.create_task(continuous_data_fetcher())
-    print("🚀 Started continuous data fetcher")
+    print("🚀 API ready - data fetcher running in background")
+    print("⚡ First data will be available in ~5 seconds")
 
 # REST API endpoints
 @app.get("/api/all-futures-combined")
@@ -141,11 +154,13 @@ async def get_all_futures():
         "success": True,
         "data": all_data,
         "timestamp": all_data["timestamp"],
+        "data_age_seconds": time.time() - all_data["timestamp"],
         "counts": {
             "current": len(all_data["current"]),
             "near": len(all_data["near"]),
             "far": len(all_data["far"])
-        }
+        },
+        "status": "ready" if len(all_data["current"]) > 0 else "loading"
     }
 
 @app.get("/api/current-futures")
