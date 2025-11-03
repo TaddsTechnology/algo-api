@@ -200,15 +200,17 @@ class KiteFarFutures:
                                         'timestamp': datetime.now().isoformat()
                                     }
                                 else:
+                                    ltp = data.get('last_price', 0)
+                                    close = data.get('ohlc', {}).get('close', 0)
+                                    change = ltp - close if close else 0
+                                    change_pct = (change / close * 100) if close else 0
+                                    
                                     live_data[symbol] = {
                                         'symbol': symbol,
-                                        'ltp': data.get('last_price', 0),
-                                        'open': data.get('ohlc', {}).get('open', 0),
-                                        'high': data.get('ohlc', {}).get('high', 0),
-                                        'low': data.get('ohlc', {}).get('low', 0),
-                                        'close': data.get('ohlc', {}).get('close', 0),
+                                        'ltp': ltp,
+                                        'change': change,
+                                        'change_pct': change_pct,
                                         'volume': data.get('volume', 0),
-                                        'oi': data.get('oi', 0),
                                         'bid': data.get('depth', {}).get('buy', [{}])[0].get('price', 0) if data.get('depth') else 0,
                                         'ask': data.get('depth', {}).get('sell', [{}])[0].get('price', 0) if data.get('depth') else 0,
                                         'contract_info': contract,
@@ -248,20 +250,27 @@ class KiteFarFutures:
         print(f"📊 Market Status: {'🟢 OPEN' if self.is_market_open() else '🔴 CLOSED'}")
         print("=" * 120)
         
-        # Header
-        print(f"{'Symbol':<20} {'LTP':<10} {'Expiry':<12} {'Days':<6} {'Popular':<8} {'Volume':<12}")
+        # Header with all fields
+        print(f"{'Symbol':<20} {'LTP':<10} {'Change':<10} {'Change%':<10} {'Volume':<12} {'Bid':<10} {'Ask':<10} {'Expiry':<12} {'Days':<6}")
         print("-" * 120)
         
         count = 0
         for symbol, data in list(self.live_data.items())[:limit]:
             contract = data.get('contract_info', {})
-            popular_icon = "⭐" if contract.get('is_popular') else "  "
+            change = data.get('change', 0)
+            change_pct = data.get('change_pct', 0)
+            
+            # Color coding for change
+            change_color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
             
             print(f"{symbol:<20} {data.get('ltp', 0):<10.2f} "
+                  f"{change_color} {change:<8.2f} "
+                  f"{change_pct:<9.2f}% "
+                  f"{data.get('volume', 0):<12} "
+                  f"{data.get('bid', 0):<10.2f} "
+                  f"{data.get('ask', 0):<10.2f} "
                   f"{contract.get('expiry_formatted', 'N/A'):<12} "
-                  f"{contract.get('days_to_expiry', 'N/A'):<6} "
-                  f"{popular_icon:<8} "
-                  f"{data.get('volume', 0):<12}")
+                  f"{contract.get('days_to_expiry', 'N/A'):<6}")
             
             count += 1
         
@@ -300,8 +309,8 @@ def main():
         while True:
             try:
                 start_time = time.time()
-                far_futures.fetch_live_data(use_ltp_only=True, limit_contracts=50)
-                far_futures.display_live_data(limit=30)
+                far_futures.fetch_live_data(use_ltp_only=False, limit_contracts=None)
+                far_futures.display_live_data(limit=None)
                 
                 fetch_time = time.time() - start_time
                 print(f"⏱️ Fetch time: {fetch_time:.2f} seconds")
