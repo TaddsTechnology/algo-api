@@ -7,7 +7,7 @@ Enhanced Algo Trading Market Data API with specialized futures endpoints
 import os
 import sys
 import uvicorn
-from fast_api_enhanced import app
+from streaming_api import app
 
 # Ensure proper path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
