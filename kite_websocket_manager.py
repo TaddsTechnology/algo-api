@@ -46,7 +46,8 @@ class KiteWebSocketManager:
             self.kws.on_noreconnect = self.on_noreconnect
             
             # Start connection in separate thread
-            ws_thread = threading.Thread(target=self.kws.connect, daemon=True)
+            # Use threaded=True to run in background without signal handlers
+            ws_thread = threading.Thread(target=lambda: self.kws.connect(threaded=True), daemon=True)
             ws_thread.start()
             
             logger.info("🚀 WebSocket connection initiated...")
