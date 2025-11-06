@@ -227,6 +227,8 @@ async def update_cache_from_websocket():
                     'volume': tick.get('volume_traded', 0),
                     'change': tick.get('change', 0),
                     'ohlc': tick.get('ohlc', {}),
+                    'bid': tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                    'ask': tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0,
                     'timestamp': tick.get('updated_at'),
                     'contract_info': contract_info['data']
                 }
