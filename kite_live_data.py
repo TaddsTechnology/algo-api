@@ -12,22 +12,25 @@ import os
 import threading
 
 class KiteLiveData:
-    def __init__(self, api_key, access_token):
+    def __init__(self, api_key, access_token, ws_manager=None):
         self.api_key = api_key
         self.access_token = access_token
         self.kite = KiteConnect(api_key=api_key, access_token=access_token)
+        self.ws_manager = ws_manager  # WebSocket manager for real-time data
         
         # Data storage
         self.instruments = []
         self.live_data = {}
         self.data_lock = threading.Lock()
         
-        # Rate limiting variables
+        # Rate limiting variables (for fallback HTTP calls only)
         self.last_request_time = 0
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
         print(f"🔑 Initialized Live Data API with key: {api_key[:10]}...")
+        if ws_manager:
+            print("🔌 WebSocket mode enabled - will use real-time tick data")
         
         # Pre-fetch instruments at startup for instant access
         print("🚀 Pre-loading instruments for instant access...")
@@ -118,8 +121,31 @@ class KiteLiveData:
                 self.last_request_time = time.time()
                 raise e
     
-    def fetch_live_data(self, use_ltp_only=True, limit_symbols=None):
-        """Fetch live spot prices for all equity instruments"""
+    def fetch_live_data_from_websocket(self):
+        """Get live data from WebSocket manager (real-time ticks)"""
+        if not self.ws_manager:
+            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            return self.fetch_live_data_http()
+        
+        try:
+            instruments = self.get_equity_instruments()
+            if not instruments:
+                return {}
+            
+            # Get all tick data from WebSocket
+            all_ticks = self.ws_manager.get_tick_data()
+            
+            # Note: For spot instruments, we need to map by symbol since we don't have instrument_token in instruments list
+            # We'll skip WebSocket for now and use HTTP for spot data
+            print("⚠️ Spot data not yet mapped to WebSocket - using HTTP fallback")
+            return self.fetch_live_data_http()
+            
+        except Exception as e:
+            print(f"❌ Error getting WebSocket data: {e}")
+            return {}
+    
+    def fetch_live_data_http(self, use_ltp_only=True, limit_symbols=None):
+        """Fetch live spot prices for all equity instruments via HTTP"""
         try:
             instruments = self.get_equity_instruments()
             
@@ -130,7 +156,7 @@ class KiteLiveData:
                 print("❌ No instruments available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(instruments)} equity instruments...")
+            print(f"📈 Fetching live data for {len(instruments)} equity instruments via HTTP...")
             
             symbols = []
             symbol_to_instrument = {}
@@ -166,6 +192,8 @@ class KiteLiveData:
                                     live_data[symbol] = {
                                         'symbol': symbol,
                                         'ltp': data.get('last_price', 0),
+                                        'bid': 0,
+                                        'ask': 0,
                                         'instrument_info': instrument,
                                         'timestamp': datetime.now().isoformat()
                                     }
@@ -186,6 +214,8 @@ class KiteLiveData:
                                         'change': change,
                                         'change_pct': change_pct,
                                         'volume': data.get('volume', 0),
+                                        'bid': data.get('depth', {}).get('buy', [{}])[0].get('price', 0) if data.get('depth') else 0,
+                                        'ask': data.get('depth', {}).get('sell', [{}])[0].get('price', 0) if data.get('depth') else 0,
                                         'instrument_info': instrument,
                                         'timestamp': datetime.now().isoformat()
                                     }
@@ -205,6 +235,13 @@ class KiteLiveData:
             import traceback
             traceback.print_exc()
             return {}
+    
+    def fetch_live_data(self, use_ltp_only=True, limit_symbols=None):
+        """Fetch live data - uses WebSocket if available, otherwise HTTP"""
+        if self.ws_manager:
+            return self.fetch_live_data_from_websocket()
+        else:
+            return self.fetch_live_data_http(use_ltp_only, limit_symbols)
     
     def get_data_as_json(self):
         """Get live data as JSON"""
@@ -233,18 +270,18 @@ def main():
         live_data = KiteLiveData(api_key, access_token)
         data = live_data.fetch_live_data(use_ltp_only=False)
         
-        print("\n" + "="*80)
+        print("\n" + "="*100)
         print("LIVE MARKET DATA")
-        print("="*80)
-        print(f"{'Symbol':<15} {'LTP':<10} {'Change':<10} {'Change%':<10} {'Volume':<12}")
-        print("-"*80)
+        print("="*100)
+        print(f"{'Symbol':<15} {'LTP':<10} {'Bid':<10} {'Ask':<10} {'Change':<10} {'Change%':<10} {'Volume':<12}")
+        print("-"*100)
         
         for symbol, info in list(data.items())[:20]:
             change = info.get('change', 0)
             change_pct = info.get('change_pct', 0)
             color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
             
-            print(f"{symbol:<15} {info.get('ltp', 0):<10.2f} {color} {change:<8.2f} {change_pct:<9.2f}% {info.get('volume', 0):<12}")
+            print(f"{symbol:<15} {info.get('ltp', 0):<10.2f} {info.get('bid', 0):<10.2f} {info.get('ask', 0):<10.2f} {color} {change:<8.2f} {change_pct:<9.2f}% {info.get('volume', 0):<12}")
         
     except Exception as e:
         print(f"❌ Error: {e}")

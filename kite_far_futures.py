@@ -15,22 +15,25 @@ import concurrent.futures
 import threading
 
 class KiteFarFutures:
-    def __init__(self, api_key, access_token):
+    def __init__(self, api_key, access_token, ws_manager=None):
         self.api_key = api_key
         self.access_token = access_token
         self.kite = KiteConnect(api_key=api_key, access_token=access_token)
+        self.ws_manager = ws_manager  # WebSocket manager for real-time data
         
         # Data storage
         self.far_contracts = []
         self.live_data = {}
         self.data_lock = threading.Lock()
         
-        # Rate limiting variables
+        # Rate limiting variables (for fallback HTTP calls only)
         self.last_request_time = 0
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
         print(f"🔑 Initialized Far Futures API with key: {api_key[:10]}...")
+        if ws_manager:
+            print("🔌 WebSocket mode enabled - will use real-time tick data")
     
     def clear_screen(self):
         """Clear terminal screen"""
@@ -152,8 +155,57 @@ class KiteFarFutures:
                 self.last_request_time = time.time()
                 raise e
     
-    def fetch_live_data(self, use_ltp_only=True, limit_contracts=None):
-        """Fetch live data for far futures"""
+    def fetch_live_data_from_websocket(self):
+        """Get live data from WebSocket manager (real-time ticks)"""
+        if not self.ws_manager:
+            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            return self.fetch_live_data_http()
+        
+        try:
+            contracts = self.get_far_futures_contracts()
+            if not contracts:
+                return {}
+            
+            # Get all tick data from WebSocket
+            all_ticks = self.ws_manager.get_tick_data()
+            
+            live_data = {}
+            for contract in contracts:
+                token = int(contract['instrument_token'])
+                tick = all_ticks.get(token)
+                
+                if tick:
+                    symbol = contract['symbol']
+                    ltp = tick.get('last_price', 0)
+                    ohlc = tick.get('ohlc', {})
+                    close = ohlc.get('close', 0)
+                    change = ltp - close if close else 0
+                    change_pct = (change / close * 100) if close else 0
+                    
+                    live_data[symbol] = {
+                        'symbol': symbol,
+                        'ltp': ltp,
+                        'change': change,
+                        'change_pct': change_pct,
+                        'volume': tick.get('volume_traded', 0),
+                        'oi': tick.get('oi', 0),
+                        'bid': tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                        'ask': tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                        'contract_info': contract,
+                        'timestamp': tick.get('updated_at', datetime.now().isoformat())
+                    }
+            
+            with self.data_lock:
+                self.live_data = live_data
+            
+            return live_data
+            
+        except Exception as e:
+            print(f"❌ Error getting WebSocket data: {e}")
+            return {}
+    
+    def fetch_live_data_http(self, use_ltp_only=True, limit_contracts=None):
+        """Fetch live data via HTTP (fallback method)"""
         try:
             contracts = self.get_far_futures_contracts()
             
@@ -164,7 +216,7 @@ class KiteFarFutures:
                 print("❌ No far futures contracts available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(contracts)} far futures...")
+            print(f"📈 Fetching live data for {len(contracts)} far futures via HTTP...")
             
             symbols = []
             symbol_to_contract = {}
@@ -232,6 +284,13 @@ class KiteFarFutures:
             import traceback
             traceback.print_exc()
             return {}
+    
+    def fetch_live_data(self, use_ltp_only=True, limit_contracts=None):
+        """Fetch live data - uses WebSocket if available, otherwise HTTP"""
+        if self.ws_manager:
+            return self.fetch_live_data_from_websocket()
+        else:
+            return self.fetch_live_data_http(use_ltp_only, limit_contracts)
     
     def get_data_as_json(self):
         """Get far live data as JSON"""

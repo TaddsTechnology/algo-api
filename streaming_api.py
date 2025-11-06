@@ -19,6 +19,7 @@ from kite_current_futures import KiteCurrentFutures
 from kite_near_futures import KiteNearFutures
 from kite_far_futures import KiteFarFutures
 from kite_live_data import KiteLiveData
+from kite_websocket_manager import KiteWebSocketManager
 
 app = FastAPI(
     title="Real-Time Futures Streaming API",
@@ -92,90 +93,185 @@ live_data_fetcher = None  # Live spot prices
 near_futures = None       # Current month futures (was "current")
 next_futures = None       # Next month futures (was "near")
 far_futures = None        # Far month futures
+ws_manager = None         # WebSocket manager for real-time data
+
+# Instrument token mappings
+token_to_contract = {}    # Maps instrument_token -> contract info
+token_to_symbol = {}      # Maps instrument_token -> symbol
 
 try:
     api_key, access_token = get_api_credentials()
     if api_key and access_token:
-        live_data_fetcher = KiteLiveData(api_key, access_token)      # Live spot data
-        near_futures = KiteCurrentFutures(api_key, access_token)     # 0-35 days
-        next_futures = KiteNearFutures(api_key, access_token)        # 36-70 days
-        far_futures = KiteFarFutures(api_key, access_token)          # 71-105 days
+        # Initialize WebSocket manager
+        ws_manager = KiteWebSocketManager(api_key, access_token)
+        
+        # Initialize contract fetchers WITH WebSocket manager for real-time data
+        live_data_fetcher = KiteLiveData(api_key, access_token, ws_manager)      # Live spot data
+        near_futures = KiteCurrentFutures(api_key, access_token, ws_manager)     # 0-35 days
+        next_futures = KiteNearFutures(api_key, access_token, ws_manager)        # 36-70 days
+        far_futures = KiteFarFutures(api_key, access_token, ws_manager)          # 71-105 days
+        
         print("✅ API fetchers initialized successfully")
+        print("🔌 WebSocket mode enabled for real-time data")
+        print("⚡ All fetchers configured to use WebSocket for live ticks")
     else:
         print("⚠️ Missing API credentials - will return empty data")
 except Exception as e:
     print(f"❌ Error initializing fetchers: {e}")
     print("⚠️ API will start but data fetching may fail")
 
-# Background task to continuously fetch data
-async def continuous_data_fetcher():
-    """Continuously fetch market data in background"""
+# Background task to setup WebSocket subscriptions
+async def setup_websocket_subscriptions():
+    """Setup WebSocket subscriptions for all instruments"""
+    global token_to_contract, token_to_symbol
+    
     # Check if fetchers are initialized
-    if not live_data_fetcher or not near_futures or not next_futures or not far_futures:
-        print("❌ Fetchers not initialized - skipping data fetch")
+    if not ws_manager or not live_data_fetcher or not near_futures or not next_futures or not far_futures:
+        print("❌ Fetchers not initialized - skipping WebSocket setup")
         return
     
-    # Start with lighter load - only popular contracts initially
-    first_fetch = True
+    try:
+        print("🔍 Fetching all instrument metadata...")
+        
+        # Get all contracts (metadata only - no price data needed)
+        live_instruments = await asyncio.to_thread(live_data_fetcher.get_equity_instruments)
+        near_contracts = await asyncio.to_thread(near_futures.get_current_futures_contracts)
+        next_contracts = await asyncio.to_thread(next_futures.get_near_futures_contracts)
+        far_contracts = await asyncio.to_thread(far_futures.get_far_futures_contracts)
+        
+        # Collect all instrument tokens to subscribe
+        all_tokens = []
+        
+        # Live data instruments
+        for instrument in live_instruments:
+            token = instrument.get('instrument_token')
+            if token:
+                all_tokens.append(int(token))
+                token_to_symbol[int(token)] = instrument.get('symbol')
+                token_to_contract[int(token)] = {'category': 'current', 'data': instrument}
+        
+        # Near futures
+        for contract in near_contracts:
+            token = contract.get('instrument_token')
+            if token:
+                all_tokens.append(int(token))
+                token_to_symbol[int(token)] = contract.get('symbol')
+                token_to_contract[int(token)] = {'category': 'near', 'data': contract}
+        
+        # Next futures
+        for contract in next_contracts:
+            token = contract.get('instrument_token')
+            if token:
+                all_tokens.append(int(token))
+                token_to_symbol[int(token)] = contract.get('symbol')
+                token_to_contract[int(token)] = {'category': 'next', 'data': contract}
+        
+        # Far futures
+        for contract in far_contracts:
+            token = contract.get('instrument_token')
+            if token:
+                all_tokens.append(int(token))
+                token_to_symbol[int(token)] = contract.get('symbol')
+                token_to_contract[int(token)] = {'category': 'far', 'data': contract}
+        
+        print(f"📊 Collected {len(all_tokens)} instrument tokens")
+        print(f"   - Live: {len(live_instruments)}")
+        print(f"   - Near: {len(near_contracts)}")
+        print(f"   - Next: {len(next_contracts)}")
+        print(f"   - Far: {len(far_contracts)}")
+        
+        # Start WebSocket
+        ws_manager.start()
+        await asyncio.sleep(2)  # Wait for connection
+        
+        # Subscribe to all tokens
+        print(f"📡 Subscribing to {len(all_tokens)} instruments via WebSocket...")
+        ws_manager.subscribe(all_tokens)
+        
+        print("✅ WebSocket subscriptions active - receiving real-time ticks")
+        
+    except Exception as e:
+        print(f"❌ Error setting up WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+
+# Background task to update cache from WebSocket data
+async def update_cache_from_websocket():
+    """Continuously update cache from WebSocket tick data"""
+    if not ws_manager:
+        return
     
     while True:
         try:
-            # Use limit on first fetch to start faster, then fetch all
-            limit = 50 if first_fetch else None
+            # Get all tick data from WebSocket
+            tick_data = ws_manager.get_tick_data()
             
-            # Fetch all categories in parallel
-            live_task = asyncio.create_task(
-                asyncio.to_thread(live_data_fetcher.fetch_live_data, use_ltp_only=False, limit_symbols=limit)
-            )
-            near_task = asyncio.create_task(
-                asyncio.to_thread(near_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
-            )
-            next_task = asyncio.create_task(
-                asyncio.to_thread(next_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
-            )
-            far_task = asyncio.create_task(
-                asyncio.to_thread(far_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
-            )
+            # Organize by category
+            current_data = {}
+            near_data = {}
+            next_data = {}
+            far_data = {}
             
-            # Wait for all to complete
-            live_data, near_data, next_data, far_data = await asyncio.gather(
-                live_task, near_task, next_task, far_task, return_exceptions=True
-            )
+            for token, tick in tick_data.items():
+                contract_info = token_to_contract.get(token)
+                if not contract_info:
+                    continue
+                
+                category = contract_info['category']
+                symbol = token_to_symbol.get(token, f"TOKEN_{token}")
+                
+                # Format tick data
+                formatted_tick = {
+                    'symbol': symbol,
+                    'ltp': tick.get('last_price', 0),
+                    'volume': tick.get('volume_traded', 0),
+                    'change': tick.get('change', 0),
+                    'ohlc': tick.get('ohlc', {}),
+                    'timestamp': tick.get('updated_at'),
+                    'contract_info': contract_info['data']
+                }
+                
+                # Assign to category
+                if category == 'current':
+                    current_data[symbol] = formatted_tick
+                elif category == 'near':
+                    near_data[symbol] = formatted_tick
+                elif category == 'next':
+                    next_data[symbol] = formatted_tick
+                elif category == 'far':
+                    far_data[symbol] = formatted_tick
             
             # Update cache
-            if not isinstance(live_data, Exception):
-                cache.update("current", live_data)
-            if not isinstance(near_data, Exception):
-                cache.update("near", near_data)
-            if not isinstance(next_data, Exception):
-                cache.update("next", next_data)
-            if not isinstance(far_data, Exception):
-                cache.update("far", far_data)
+            cache.update("current", current_data)
+            cache.update("near", near_data)
+            cache.update("next", next_data)
+            cache.update("far", far_data)
             
-            print(f"✅ Updated at {datetime.now().strftime('%H:%M:%S')} - Live: {len(live_data) if not isinstance(live_data, Exception) else 0}, Near: {len(near_data) if not isinstance(near_data, Exception) else 0}, Next: {len(next_data) if not isinstance(next_data, Exception) else 0}, Far: {len(far_data) if not isinstance(far_data, Exception) else 0}")
+            if len(tick_data) > 0:
+                print(f"📊 Updated cache at {datetime.now().strftime('%H:%M:%S')} - Live: {len(current_data)}, Near: {len(near_data)}, Next: {len(next_data)}, Far: {len(far_data)}")
             
-            # After first fetch, fetch all contracts
-            if first_fetch:
-                first_fetch = False
-                await asyncio.sleep(0.5)  # Quick refresh to get all contracts
-            else:
-                await asyncio.sleep(2)  # Update every 2 seconds for all contracts
+            await asyncio.sleep(0.5)  # Update cache every 0.5 seconds
             
         except Exception as e:
-            print(f"⚠️ Error in fetcher: {e}")
-            await asyncio.sleep(2)
+            print(f"⚠️ Error updating cache: {e}")
+            await asyncio.sleep(1)
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background data fetcher"""
+    """Start WebSocket and background tasks"""
     print("🚀 Starting API...")
     try:
-        # Start fetcher without blocking startup
-        asyncio.create_task(continuous_data_fetcher())
-        print("✅ API ready - data fetcher running in background")
-        print("⚡ First data will be available in ~5-10 seconds")
+        # Setup WebSocket subscriptions
+        asyncio.create_task(setup_websocket_subscriptions())
+        
+        # Start cache updater
+        await asyncio.sleep(3)  # Wait for WebSocket to connect
+        asyncio.create_task(update_cache_from_websocket())
+        
+        print("✅ API ready - WebSocket streaming active")
+        print("⚡ Real-time data streaming started")
     except Exception as e:
-        print(f"⚠️ Error starting data fetcher: {e}")
+        print(f"⚠️ Error starting WebSocket: {e}")
         print("🚨 API will still respond but data may be empty initially")
 
 # REST API endpoints
@@ -282,7 +378,7 @@ async def stream_futures():
                     "timestamp": all_data["timestamp"]
                 })
                 yield f"data: {data_json}\n\n"
-                await asyncio.sleep(1)  # Stream every 1 second
+                await asyncio.sleep(0.5)  # Stream every 0.5 seconds
             except Exception as e:
                 yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
                 await asyncio.sleep(2)
