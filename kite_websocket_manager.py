@@ -66,7 +66,7 @@ class KiteWebSocketManager:
             tokens = list(self.subscribed_tokens)
             logger.info(f"📡 Subscribing to {len(tokens)} instruments...")
             ws.subscribe(tokens)
-            ws.set_mode(ws.MODE_QUOTE, tokens)  # Use QUOTE mode for OHLC, volume, etc.
+            ws.set_mode(ws.MODE_FULL, tokens)  # Use FULL mode for OHLC, volume, depth (bid/ask)
     
     def on_ticks(self, ws, ticks):
         """Callback when ticks are received"""
@@ -131,7 +131,7 @@ class KiteWebSocketManager:
         if self.is_connected and self.kws:
             logger.info(f"📡 Subscribing to {len(instrument_tokens)} new instruments...")
             self.kws.subscribe(instrument_tokens)
-            self.kws.set_mode(self.kws.MODE_QUOTE, instrument_tokens)
+            self.kws.set_mode(self.kws.MODE_FULL, instrument_tokens)
         else:
             logger.info(f"📝 Queued {len(instrument_tokens)} instruments for subscription")
     
