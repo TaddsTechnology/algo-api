@@ -18,6 +18,7 @@ from datetime import datetime
 from kite_current_futures import KiteCurrentFutures
 from kite_near_futures import KiteNearFutures
 from kite_far_futures import KiteFarFutures
+from kite_live_data import KiteLiveData
 
 app = FastAPI(
     title="Real-Time Futures Streaming API",
@@ -37,9 +38,10 @@ app.add_middleware(
 # Global cache for market data
 class MarketDataCache:
     def __init__(self):
-        self.current_data = {}
-        self.near_data = {}
-        self.far_data = {}
+        self.current_data = {}  # Live market data (spot prices)
+        self.near_data = {}     # Current month futures (0-35 days)
+        self.next_data = {}     # Next month futures (36-70 days)
+        self.far_data = {}      # Far month futures (71-105 days)
         self.last_update = time.time()
         
     def update(self, category, data):
@@ -47,6 +49,8 @@ class MarketDataCache:
             self.current_data = data
         elif category == "near":
             self.near_data = data
+        elif category == "next":
+            self.next_data = data
         elif category == "far":
             self.far_data = data
         self.last_update = time.time()
@@ -55,6 +59,7 @@ class MarketDataCache:
         return {
             "current": self.current_data,
             "near": self.near_data,
+            "next": self.next_data,
             "far": self.far_data,
             "timestamp": self.last_update
         }
@@ -81,16 +86,20 @@ def get_api_credentials():
     return api_key, access_token
 
 # Initialize fetchers with error handling
-current_futures = None
-near_futures = None
-far_futures = None
+# Note: "near_futures" now fetches current month (0-35 days)
+# "next_futures" now fetches next month (36-70 days)
+live_data_fetcher = None  # Live spot prices
+near_futures = None       # Current month futures (was "current")
+next_futures = None       # Next month futures (was "near")
+far_futures = None        # Far month futures
 
 try:
     api_key, access_token = get_api_credentials()
     if api_key and access_token:
-        current_futures = KiteCurrentFutures(api_key, access_token)
-        near_futures = KiteNearFutures(api_key, access_token)
-        far_futures = KiteFarFutures(api_key, access_token)
+        live_data_fetcher = KiteLiveData(api_key, access_token)      # Live spot data
+        near_futures = KiteCurrentFutures(api_key, access_token)     # 0-35 days
+        next_futures = KiteNearFutures(api_key, access_token)        # 36-70 days
+        far_futures = KiteFarFutures(api_key, access_token)          # 71-105 days
         print("✅ API fetchers initialized successfully")
     else:
         print("⚠️ Missing API credentials - will return empty data")
@@ -102,7 +111,7 @@ except Exception as e:
 async def continuous_data_fetcher():
     """Continuously fetch market data in background"""
     # Check if fetchers are initialized
-    if not current_futures or not near_futures or not far_futures:
+    if not live_data_fetcher or not near_futures or not next_futures or not far_futures:
         print("❌ Fetchers not initialized - skipping data fetch")
         return
     
@@ -115,30 +124,35 @@ async def continuous_data_fetcher():
             limit = 50 if first_fetch else None
             
             # Fetch all categories in parallel
-            current_task = asyncio.create_task(
-                asyncio.to_thread(current_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
+            live_task = asyncio.create_task(
+                asyncio.to_thread(live_data_fetcher.fetch_live_data, use_ltp_only=False, limit_symbols=limit)
             )
             near_task = asyncio.create_task(
                 asyncio.to_thread(near_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
+            )
+            next_task = asyncio.create_task(
+                asyncio.to_thread(next_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
             )
             far_task = asyncio.create_task(
                 asyncio.to_thread(far_futures.fetch_live_data, use_ltp_only=False, limit_contracts=limit)
             )
             
             # Wait for all to complete
-            current_data, near_data, far_data = await asyncio.gather(
-                current_task, near_task, far_task, return_exceptions=True
+            live_data, near_data, next_data, far_data = await asyncio.gather(
+                live_task, near_task, next_task, far_task, return_exceptions=True
             )
             
             # Update cache
-            if not isinstance(current_data, Exception):
-                cache.update("current", current_data)
+            if not isinstance(live_data, Exception):
+                cache.update("current", live_data)
             if not isinstance(near_data, Exception):
                 cache.update("near", near_data)
+            if not isinstance(next_data, Exception):
+                cache.update("next", next_data)
             if not isinstance(far_data, Exception):
                 cache.update("far", far_data)
             
-            print(f"✅ Updated at {datetime.now().strftime('%H:%M:%S')} - Current: {len(current_data) if not isinstance(current_data, Exception) else 0}, Near: {len(near_data) if not isinstance(near_data, Exception) else 0}, Far: {len(far_data) if not isinstance(far_data, Exception) else 0}")
+            print(f"✅ Updated at {datetime.now().strftime('%H:%M:%S')} - Live: {len(live_data) if not isinstance(live_data, Exception) else 0}, Near: {len(near_data) if not isinstance(near_data, Exception) else 0}, Next: {len(next_data) if not isinstance(next_data, Exception) else 0}, Far: {len(far_data) if not isinstance(far_data, Exception) else 0}")
             
             # After first fetch, fetch all contracts
             if first_fetch:
@@ -171,15 +185,17 @@ async def get_all_futures():
     try:
         all_data = cache.get_all()
         timestamp = all_data.get("timestamp", time.time())
-        current_data = all_data.get("current", {})
-        near_data = all_data.get("near", {})
-        far_data = all_data.get("far", {})
+        current_data = all_data.get("current", {})  # Live spot prices
+        near_data = all_data.get("near", {})        # Current month futures (0-35 days)
+        next_data = all_data.get("next", {})        # Next month futures (36-70 days)
+        far_data = all_data.get("far", {})          # Far month futures (71-105 days)
         
         return {
             "success": True,
             "data": {
                 "current": current_data,
                 "near": near_data,
+                "next": next_data,
                 "far": far_data,
                 "timestamp": timestamp
             },
@@ -188,9 +204,10 @@ async def get_all_futures():
             "counts": {
                 "current": len(current_data),
                 "near": len(near_data),
+                "next": len(next_data),
                 "far": len(far_data)
             },
-            "status": "ready" if len(current_data) > 0 else "loading"
+            "status": "ready" if len(near_data) > 0 else "loading"
         }
     except Exception as e:
         print(f"❌ Error in get_all_futures: {e}")
@@ -199,17 +216,18 @@ async def get_all_futures():
         return {
             "success": False,
             "error": str(e),
-            "data": {"current": {}, "near": {}, "far": {}, "timestamp": time.time()},
+            "data": {"current": {}, "near": {}, "next": {}, "far": {}, "timestamp": time.time()},
             "timestamp": time.time(),
-            "counts": {"current": 0, "near": 0, "far": 0},
+            "counts": {"current": 0, "near": 0, "next": 0, "far": 0},
             "status": "error"
         }
 
-@app.get("/api/current-futures")
-async def get_current_futures():
-    """Get current futures only"""
+@app.get("/api/live-data")
+async def get_live_data():
+    """Get live market data (spot prices)"""
     return {
         "category": "current",
+        "description": "Live spot market data",
         "data": cache.current_data,
         "timestamp": cache.last_update,
         "count": len(cache.current_data)
@@ -217,19 +235,32 @@ async def get_current_futures():
 
 @app.get("/api/near-futures")
 async def get_near_futures():
-    """Get near futures only"""
+    """Get near futures (current month: 0-35 days expiry)"""
     return {
         "category": "near",
+        "description": "Current month futures (0-35 days)",
         "data": cache.near_data,
         "timestamp": cache.last_update,
         "count": len(cache.near_data)
     }
 
+@app.get("/api/next-futures")
+async def get_next_futures():
+    """Get next futures (next month: 36-70 days expiry)"""
+    return {
+        "category": "next",
+        "description": "Next month futures (36-70 days)",
+        "data": cache.next_data,
+        "timestamp": cache.last_update,
+        "count": len(cache.next_data)
+    }
+
 @app.get("/api/far-futures")
 async def get_far_futures():
-    """Get far futures only"""
+    """Get far futures (far month: 71-105 days expiry)"""
     return {
         "category": "far",
+        "description": "Far month futures (71-105 days)",
         "data": cache.far_data,
         "timestamp": cache.last_update,
         "count": len(cache.far_data)
@@ -246,6 +277,7 @@ async def stream_futures():
                 data_json = json.dumps({
                     "current": all_data["current"],
                     "near": all_data["near"],
+                    "next": all_data["next"],
                     "far": all_data["far"],
                     "timestamp": all_data["timestamp"]
                 })
@@ -275,6 +307,7 @@ async def health_check():
         "contracts": {
             "current": len(cache.current_data),
             "near": len(cache.near_data),
+            "next": len(cache.next_data),
             "far": len(cache.far_data)
         }
     }
@@ -287,9 +320,10 @@ async def root():
         "version": "3.0.0",
         "endpoints": {
             "all_futures": "/api/all-futures-combined",
-            "current": "/api/current-futures",
-            "near": "/api/near-futures",
-            "far": "/api/far-futures",
+            "current": "/api/live-data (Live spot prices)",
+            "near": "/api/near-futures (0-35 days)",
+            "next": "/api/next-futures (36-70 days)",
+            "far": "/api/far-futures (71-105 days)",
             "stream": "/api/stream (SSE)",
             "health": "/api/health"
         },
