@@ -80,16 +80,39 @@ class KiteLiveData:
             
             print(f"📊 Found {len(underlying_symbols)} unique underlying symbols with futures")
             
+            # Now fetch NSE spot instruments to get instrument tokens
+            print("🔍 Fetching NSE spot instruments for instrument tokens...")
+            nse_instruments_data = self.kite.instruments('NSE')
+            
+            # Map symbol to instrument token
+            symbol_to_token = {}
+            if nse_instruments_data and 'data' in nse_instruments_data:
+                for instrument in nse_instruments_data['data']:
+                    try:
+                        symbol = instrument.get('tradingsymbol', '').upper()
+                        instrument_type = instrument.get('instrument_type', '').upper()
+                        instrument_token = instrument.get('instrument_token')
+                        
+                        # Only equity instruments
+                        if instrument_type == 'EQ' and symbol and instrument_token:
+                            symbol_to_token[symbol] = instrument_token
+                    except Exception:
+                        continue
+            
+            print(f"✅ Mapped {len(symbol_to_token)} NSE equity instrument tokens")
+            
             # Build instrument list with metadata
             equity_instruments = []
             for symbol in underlying_symbols.keys():
                 is_popular = any(pop_symbol in symbol for pop_symbol in popular_symbols)
+                instrument_token = symbol_to_token.get(symbol)
                 
                 equity_instruments.append({
                     'symbol': symbol,
                     'name': symbol,
                     'exchange': 'NSE',  # Spot prices are on NSE
                     'instrument_type': 'EQ',
+                    'instrument_token': instrument_token,  # Add instrument token for WebSocket
                     'is_popular': is_popular
                 })
             
@@ -135,10 +158,42 @@ class KiteLiveData:
             # Get all tick data from WebSocket
             all_ticks = self.ws_manager.get_tick_data()
             
-            # Note: For spot instruments, we need to map by symbol since we don't have instrument_token in instruments list
-            # We'll skip WebSocket for now and use HTTP for spot data
-            print("⚠️ Spot data not yet mapped to WebSocket - using HTTP fallback")
-            return self.fetch_live_data_http()
+            live_data = {}
+            for instrument in instruments:
+                token = instrument.get('instrument_token')
+                if not token:
+                    continue
+                    
+                tick = all_ticks.get(int(token))
+                
+                if tick:
+                    symbol = instrument['symbol']
+                    ltp = tick.get('last_price', 0)
+                    ohlc = tick.get('ohlc', {})
+                    close = ohlc.get('close', 0)
+                    change = ltp - close if close else 0
+                    change_pct = (change / close * 100) if close else 0
+                    
+                    live_data[symbol] = {
+                        'symbol': symbol,
+                        'ltp': ltp,
+                        'open': ohlc.get('open', 0),
+                        'high': ohlc.get('high', 0),
+                        'low': ohlc.get('low', 0),
+                        'close': close,
+                        'change': change,
+                        'change_pct': change_pct,
+                        'volume': tick.get('volume_traded', 0),
+                        'bid': tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                        'ask': tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                        'instrument_info': instrument,
+                        'timestamp': tick.get('updated_at', datetime.now().isoformat())
+                    }
+            
+            with self.data_lock:
+                self.live_data = live_data
+            
+            return live_data
             
         except Exception as e:
             print(f"❌ Error getting WebSocket data: {e}")
