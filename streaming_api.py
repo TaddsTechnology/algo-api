@@ -258,6 +258,44 @@ async def update_cache_from_websocket():
             print(f"⚠️ Error updating cache: {e}")
             await asyncio.sleep(1)
 
+# Background task to update equity bid/ask via HTTP
+async def update_equity_depth_http():
+    """Periodically fetch equity bid/ask via HTTP (WebSocket doesn't provide depth for equity)"""
+    if not live_data_fetcher:
+        return
+    
+    await asyncio.sleep(5)  # Wait for initial WebSocket data
+    
+    while True:
+        try:
+            # Fetch equity data with depth via HTTP
+            print("🔍 Fetching equity bid/ask via HTTP...")
+            equity_data = await asyncio.to_thread(
+                live_data_fetcher.fetch_live_data_http, 
+                use_ltp_only=False,  # Get full quote with depth
+                limit_symbols=None
+            )
+            
+            if equity_data:
+                # Update only bid/ask in cache while keeping WebSocket LTP/volume
+                with cache.data_lock if hasattr(cache, 'data_lock') else lambda: None:
+                    for symbol, data in equity_data.items():
+                        if symbol in cache.current_data:
+                            # Merge: keep WebSocket LTP but use HTTP bid/ask
+                            cache.current_data[symbol]['bid'] = data.get('bid', 0)
+                            cache.current_data[symbol]['ask'] = data.get('ask', 0)
+                        else:
+                            # New entry from HTTP
+                            cache.current_data[symbol] = data
+                
+                print(f"✅ Updated bid/ask for {len(equity_data)} equity instruments")
+            
+            await asyncio.sleep(10)  # Update depth every 10 seconds
+            
+        except Exception as e:
+            print(f"⚠️ Error updating equity depth: {e}")
+            await asyncio.sleep(10)
+
 @app.on_event("startup")
 async def startup_event():
     """Start WebSocket and background tasks"""
@@ -270,8 +308,12 @@ async def startup_event():
         await asyncio.sleep(3)  # Wait for WebSocket to connect
         asyncio.create_task(update_cache_from_websocket())
         
+        # Start equity depth updater (HTTP fallback for bid/ask)
+        asyncio.create_task(update_equity_depth_http())
+        
         print("✅ API ready - WebSocket streaming active")
         print("⚡ Real-time data streaming started")
+        print("📊 Equity bid/ask will update via HTTP every 10 seconds")
     except Exception as e:
         print(f"⚠️ Error starting WebSocket: {e}")
         print("🚨 API will still respond but data may be empty initially")
