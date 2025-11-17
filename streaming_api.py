@@ -237,6 +237,7 @@ async def update_cache_from_websocket():
     if not ws_manager:
         return
     
+    update_counter = 0  # Track updates for periodic logging
     while True:
         try:
             tick_data = ws_manager.get_tick_data()
@@ -280,8 +281,10 @@ async def update_cache_from_websocket():
             cache.update("next", next_data)
             cache.update("far", far_data)
             
-            if len(tick_data) > 0:
-                print(f"📊 Updated at {datetime.now().strftime('%H:%M:%S')} - {len(current_data)}/{len(near_data)}/{len(next_data)}/{len(far_data)}")
+            # Only log every 30 seconds instead of every second
+            update_counter += 1
+            if len(tick_data) > 0 and update_counter % 30 == 0:
+                print(f"📊 Updated at {datetime.now().strftime('%H:%M:%S')} - {len(current_data)}/{len(near_data)}/{len(next_data)}/{len(far_data)} (checked {update_counter} times)")
             
             await asyncio.sleep(1)  # Update every 1 second (reduced from 0.5s)
             
