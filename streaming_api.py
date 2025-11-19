@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
 """
-OPTIMIZED Streaming API for Real-Time Market Data
-✅ Connection pooling - reuses data across all users
-✅ Rate limiting - prevents overload
-✅ Pre-serialized cache - sends same JSON to all users
-✅ Connection tracking - monitors active users
+Optimized Streaming API for Real-Time Market Data
+Uses Server-Sent Events (SSE) for continuous data streaming
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Dict, Any, Set
+from fastapi.responses import StreamingResponse
+from typing import Dict, Any
 import asyncio
 import json
 import os
 import time
 from datetime import datetime
-from collections import defaultdict
 
 # Import our specialized futures fetchers
 from kite_current_futures import KiteCurrentFutures
@@ -26,9 +22,9 @@ from kite_live_data import KiteLiveData
 from kite_websocket_manager import KiteWebSocketManager
 
 app = FastAPI(
-    title="Optimized Real-Time Futures Streaming API",
-    description="High-performance streaming API with connection pooling",
-    version="4.0.0"
+    title="Real-Time Futures Streaming API",
+    description="High-performance streaming API for live futures market data",
+    version="3.0.0"
 )
 
 # Add CORS middleware
@@ -40,20 +36,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ====================
-# OPTIMIZATION 1: Pre-serialized cache
-# ====================
-class OptimizedMarketDataCache:
+# Global cache for market data
+class MarketDataCache:
     def __init__(self):
-        self.current_data = {}
-        self.near_data = {}
-        self.next_data = {}
-        self.far_data = {}
+        self.current_data = {}  # Live market data (spot prices)
+        self.near_data = {}     # Current month futures (0-35 days)
+        self.next_data = {}     # Next month futures (36-70 days)
+        self.far_data = {}      # Far month futures (71-105 days)
         self.last_update = time.time()
-        
-        # Pre-serialized JSON (avoids re-serialization for each user)
-        self._cached_json = "{}"
-        self._cache_dirty = True
         
     def update(self, category, data):
         if category == "current":
@@ -65,7 +55,6 @@ class OptimizedMarketDataCache:
         elif category == "far":
             self.far_data = data
         self.last_update = time.time()
-        self._cache_dirty = True
     
     def get_all(self):
         return {
@@ -75,67 +64,16 @@ class OptimizedMarketDataCache:
             "far": self.far_data,
             "timestamp": self.last_update
         }
-    
-    def get_cached_json(self):
-        """Return pre-serialized JSON - computed once, sent to all users"""
-        if self._cache_dirty:
-            self._cached_json = json.dumps({
-                "current": self.current_data,
-                "near": self.near_data,
-                "next": self.next_data,
-                "far": self.far_data,
-                "timestamp": self.last_update
-            })
-            self._cache_dirty = False
-        return self._cached_json
 
-cache = OptimizedMarketDataCache()
+cache = MarketDataCache()
 
-# ====================
-# OPTIMIZATION 2: Connection tracking & limits
-# ====================
-class ConnectionManager:
-    def __init__(self, max_connections=50):
-        self.active_connections: Set[str] = set()
-        self.max_connections = max_connections
-        self.ip_connections: Dict[str, int] = defaultdict(int)
-        self.max_per_ip = 5
-    
-    def can_connect(self, client_ip: str) -> tuple[bool, str]:
-        """Check if new connection is allowed"""
-        if len(self.active_connections) >= self.max_connections:
-            return False, f"Server at capacity ({self.max_connections} connections)"
-        
-        if self.ip_connections[client_ip] >= self.max_per_ip:
-            return False, f"Too many connections from your IP (max {self.max_per_ip})"
-        
-        return True, "OK"
-    
-    def add_connection(self, connection_id: str, client_ip: str):
-        self.active_connections.add(connection_id)
-        self.ip_connections[client_ip] += 1
-        print(f"✅ New connection {connection_id[:8]} from {client_ip} - Total: {len(self.active_connections)}")
-    
-    def remove_connection(self, connection_id: str, client_ip: str):
-        self.active_connections.discard(connection_id)
-        self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
-        print(f"❌ Closed connection {connection_id[:8]} from {client_ip} - Total: {len(self.active_connections)}")
-    
-    def get_stats(self):
-        return {
-            "active_connections": len(self.active_connections),
-            "max_connections": self.max_connections,
-            "unique_ips": len([ip for ip, count in self.ip_connections.items() if count > 0])
-        }
-
-connection_manager = ConnectionManager(max_connections=50)
-
-# Initialize API fetchers (same as before)
+# Initialize API fetchers
 def get_api_credentials():
     api_key = os.getenv('KITE_API_KEY')
     access_token = os.getenv('KITE_ACCESS_TOKEN')
     
     if not api_key or not access_token:
+        # Try config file
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location("config", "kite_config_hf.py")
@@ -148,35 +86,46 @@ def get_api_credentials():
     
     return api_key, access_token
 
-# Initialize fetchers
-live_data_fetcher = None
-near_futures = None
-next_futures = None
-far_futures = None
-ws_manager = None
+# Initialize fetchers with error handling
+# Note: "near_futures" now fetches current month (0-35 days)
+# "next_futures" now fetches next month (36-70 days)
+live_data_fetcher = None  # Live spot prices
+near_futures = None       # Current month futures (was "current")
+next_futures = None       # Next month futures (was "near")
+far_futures = None        # Far month futures
+ws_manager = None         # WebSocket manager for real-time data
 
-token_to_contract = {}
-token_to_symbol = {}
+# Instrument token mappings
+token_to_contract = {}    # Maps instrument_token -> contract info
+token_to_symbol = {}      # Maps instrument_token -> symbol
 
 try:
     api_key, access_token = get_api_credentials()
     if api_key and access_token:
+        # Initialize WebSocket manager
         ws_manager = KiteWebSocketManager(api_key, access_token)
-        live_data_fetcher = KiteLiveData(api_key, access_token, ws_manager)
-        near_futures = KiteCurrentFutures(api_key, access_token, ws_manager)
-        next_futures = KiteNearFutures(api_key, access_token, ws_manager)
-        far_futures = KiteFarFutures(api_key, access_token, ws_manager)
+        
+        # Initialize contract fetchers WITH WebSocket manager for real-time data
+        live_data_fetcher = KiteLiveData(api_key, access_token, ws_manager)      # Live spot data
+        near_futures = KiteCurrentFutures(api_key, access_token, ws_manager)     # 0-35 days
+        next_futures = KiteNearFutures(api_key, access_token, ws_manager)        # 36-70 days
+        far_futures = KiteFarFutures(api_key, access_token, ws_manager)          # 71-105 days
+        
         print("✅ API fetchers initialized successfully")
+        print("🔌 WebSocket mode enabled for real-time data")
+        print("⚡ All fetchers configured to use WebSocket for live ticks")
     else:
-        print("⚠️ Missing API credentials")
+        print("⚠️ Missing API credentials - will return empty data")
 except Exception as e:
     print(f"❌ Error initializing fetchers: {e}")
+    print("⚠️ API will start but data fetching may fail")
 
-# Background tasks (same as before)
+# Background task to setup WebSocket subscriptions
 async def setup_websocket_subscriptions():
     """Setup WebSocket subscriptions for all instruments"""
     global token_to_contract, token_to_symbol
     
+    # Check if fetchers are initialized
     if not ws_manager or not live_data_fetcher or not near_futures or not next_futures or not far_futures:
         print("❌ Fetchers not initialized - skipping WebSocket setup")
         return
@@ -184,13 +133,16 @@ async def setup_websocket_subscriptions():
     try:
         print("🔍 Fetching all instrument metadata...")
         
+        # Get all contracts (metadata only - no price data needed)
         live_instruments = await asyncio.to_thread(live_data_fetcher.get_equity_instruments)
         near_contracts = await asyncio.to_thread(near_futures.get_current_futures_contracts)
         next_contracts = await asyncio.to_thread(next_futures.get_near_futures_contracts)
         far_contracts = await asyncio.to_thread(far_futures.get_far_futures_contracts)
         
+        # Collect all instrument tokens to subscribe
         all_tokens = []
         
+        # Live data instruments
         for instrument in live_instruments:
             token = instrument.get('instrument_token')
             if token:
@@ -198,6 +150,7 @@ async def setup_websocket_subscriptions():
                 token_to_symbol[int(token)] = instrument.get('symbol')
                 token_to_contract[int(token)] = {'category': 'current', 'data': instrument}
         
+        # Near futures
         for contract in near_contracts:
             token = contract.get('instrument_token')
             if token:
@@ -205,6 +158,7 @@ async def setup_websocket_subscriptions():
                 token_to_symbol[int(token)] = contract.get('symbol')
                 token_to_contract[int(token)] = {'category': 'near', 'data': contract}
         
+        # Next futures
         for contract in next_contracts:
             token = contract.get('instrument_token')
             if token:
@@ -212,6 +166,7 @@ async def setup_websocket_subscriptions():
                 token_to_symbol[int(token)] = contract.get('symbol')
                 token_to_contract[int(token)] = {'category': 'next', 'data': contract}
         
+        # Far futures
         for contract in far_contracts:
             token = contract.get('instrument_token')
             if token:
@@ -220,28 +175,38 @@ async def setup_websocket_subscriptions():
                 token_to_contract[int(token)] = {'category': 'far', 'data': contract}
         
         print(f"📊 Collected {len(all_tokens)} instrument tokens")
+        print(f"   - Live: {len(live_instruments)}")
+        print(f"   - Near: {len(near_contracts)}")
+        print(f"   - Next: {len(next_contracts)}")
+        print(f"   - Far: {len(far_contracts)}")
         
+        # Start WebSocket
         ws_manager.start()
-        await asyncio.sleep(2)
+        await asyncio.sleep(2)  # Wait for connection
         
+        # Subscribe to all tokens
         print(f"📡 Subscribing to {len(all_tokens)} instruments via WebSocket...")
         ws_manager.subscribe(all_tokens)
         
-        print("✅ WebSocket subscriptions active")
+        print("✅ WebSocket subscriptions active - receiving real-time ticks")
         
     except Exception as e:
         print(f"❌ Error setting up WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
 
+# Background task to update cache from WebSocket data
 async def update_cache_from_websocket():
     """Continuously update cache from WebSocket tick data"""
     if not ws_manager:
         return
     
-    update_counter = 0  # Track updates for periodic logging
     while True:
         try:
+            # Get all tick data from WebSocket
             tick_data = ws_manager.get_tick_data()
             
+            # Organize by category
             current_data = {}
             near_data = {}
             next_data = {}
@@ -255,6 +220,7 @@ async def update_cache_from_websocket():
                 category = contract_info['category']
                 symbol = token_to_symbol.get(token, f"TOKEN_{token}")
                 
+                # Format tick data
                 formatted_tick = {
                     'symbol': symbol,
                     'ltp': tick.get('last_price', 0),
@@ -267,6 +233,7 @@ async def update_cache_from_websocket():
                     'contract_info': contract_info['data']
                 }
                 
+                # Assign to category
                 if category == 'current':
                     current_data[symbol] = formatted_tick
                 elif category == 'near':
@@ -276,121 +243,91 @@ async def update_cache_from_websocket():
                 elif category == 'far':
                     far_data[symbol] = formatted_tick
             
+            # Update cache
             cache.update("current", current_data)
             cache.update("near", near_data)
             cache.update("next", next_data)
             cache.update("far", far_data)
             
-            # Only log every 30 seconds instead of every second
-            update_counter += 1
-            if len(tick_data) > 0 and update_counter % 30 == 0:
-                print(f"📊 Updated at {datetime.now().strftime('%H:%M:%S')} - {len(current_data)}/{len(near_data)}/{len(next_data)}/{len(far_data)} (checked {update_counter} times)")
+            if len(tick_data) > 0:
+                print(f"📊 Updated cache at {datetime.now().strftime('%H:%M:%S')} - Live: {len(current_data)}, Near: {len(near_data)}, Next: {len(next_data)}, Far: {len(far_data)}")
             
-            await asyncio.sleep(1)  # Update every 1 second (reduced from 0.5s)
+            await asyncio.sleep(0.5)  # Update cache every 0.5 seconds
             
         except Exception as e:
             print(f"⚠️ Error updating cache: {e}")
             await asyncio.sleep(1)
 
+# Background task to update equity bid/ask via HTTP
 async def update_equity_depth_http():
-    """Periodically fetch equity bid/ask via HTTP"""
+    """Periodically fetch equity bid/ask via HTTP (WebSocket doesn't provide depth for equity)"""
     if not live_data_fetcher:
         return
     
-    await asyncio.sleep(5)
+    await asyncio.sleep(5)  # Wait for initial WebSocket data
     
     while True:
         try:
+            # Fetch equity data with depth via HTTP
+            print("🔍 Fetching equity bid/ask via HTTP...")
             equity_data = await asyncio.to_thread(
-                live_data_fetcher.fetch_live_data_http,
-                use_ltp_only=False,
+                live_data_fetcher.fetch_live_data_http, 
+                use_ltp_only=False,  # Get full quote with depth
                 limit_symbols=None
             )
             
             if equity_data:
+                # Update only bid/ask in cache while keeping WebSocket LTP/volume
                 for symbol, data in equity_data.items():
                     if symbol in cache.current_data:
+                        # Merge: keep WebSocket LTP but use HTTP bid/ask
                         cache.current_data[symbol]['bid'] = data.get('bid', 0)
                         cache.current_data[symbol]['ask'] = data.get('ask', 0)
                     else:
+                        # New entry from HTTP
                         cache.current_data[symbol] = data
+                
+                print(f"✅ Updated bid/ask for {len(equity_data)} equity instruments")
             
-            await asyncio.sleep(15)  # Reduced frequency to 15s
+            await asyncio.sleep(10)  # Update depth every 10 seconds
             
         except Exception as e:
             print(f"⚠️ Error updating equity depth: {e}")
-            await asyncio.sleep(15)
+            await asyncio.sleep(10)
 
 @app.on_event("startup")
 async def startup_event():
     """Start WebSocket and background tasks"""
-    print("🚀 Starting Optimized API...")
+    print("🚀 Starting API...")
     try:
+        # Setup WebSocket subscriptions
         asyncio.create_task(setup_websocket_subscriptions())
-        await asyncio.sleep(3)
+        
+        # Start cache updater
+        await asyncio.sleep(3)  # Wait for WebSocket to connect
         asyncio.create_task(update_cache_from_websocket())
+        
+        # Start equity depth updater (HTTP fallback for bid/ask)
         asyncio.create_task(update_equity_depth_http())
-        print("✅ API ready - Optimized streaming active")
+        
+        print("✅ API ready - WebSocket streaming active")
+        print("⚡ Real-time data streaming started")
+        print("📊 Equity bid/ask will update via HTTP every 10 seconds")
     except Exception as e:
-        print(f"⚠️ Error starting: {e}")
+        print(f"⚠️ Error starting WebSocket: {e}")
+        print("🚨 API will still respond but data may be empty initially")
 
-# ====================
-# OPTIMIZATION 3: Efficient SSE with connection tracking
-# ====================
-@app.get("/api/stream")
-async def stream_futures(request: Request):
-    """
-    Optimized SSE endpoint:
-    - Connection limits per IP
-    - Pre-serialized JSON (no repeated serialization)
-    - Longer intervals (2s instead of 0.5s)
-    """
-    client_ip = request.client.host
-    connection_id = f"{client_ip}_{time.time()}"
-    
-    # Check connection limits
-    can_connect, message = connection_manager.can_connect(client_ip)
-    if not can_connect:
-        return JSONResponse(
-            status_code=429,
-            content={"error": message}
-        )
-    
-    async def event_generator():
-        connection_manager.add_connection(connection_id, client_ip)
-        try:
-            while True:
-                # Use pre-serialized JSON (computed once, sent to all)
-                data_json = cache.get_cached_json()
-                yield f"data: {data_json}\n\n"
-                await asyncio.sleep(2)  # Send every 2 seconds (not 0.5s)
-        except Exception as e:
-            print(f"⚠️ Stream error for {connection_id[:8]}: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-        finally:
-            connection_manager.remove_connection(connection_id, client_ip)
-    
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
-# REST endpoints (same as before but with optimized cache)
+# REST API endpoints
 @app.get("/api/all-futures-combined")
 async def get_all_futures():
     """Get all futures data (optimized single endpoint)"""
     try:
         all_data = cache.get_all()
         timestamp = all_data.get("timestamp", time.time())
-        current_data = all_data.get("current", {})
-        near_data = all_data.get("near", {})
-        next_data = all_data.get("next", {})
-        far_data = all_data.get("far", {})
+        current_data = all_data.get("current", {})  # Live spot prices
+        near_data = all_data.get("near", {})        # Current month futures (0-35 days)
+        next_data = all_data.get("next", {})        # Next month futures (36-70 days)
+        far_data = all_data.get("far", {})          # Far month futures (71-105 days)
         
         return {
             "success": True,
@@ -412,15 +349,21 @@ async def get_all_futures():
             "status": "ready" if len(near_data) > 0 else "loading"
         }
     except Exception as e:
+        print(f"❌ Error in get_all_futures: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "success": False,
             "error": str(e),
             "data": {"current": {}, "near": {}, "next": {}, "far": {}, "timestamp": time.time()},
+            "timestamp": time.time(),
+            "counts": {"current": 0, "near": 0, "next": 0, "far": 0},
             "status": "error"
         }
 
 @app.get("/api/live-data")
 async def get_live_data():
+    """Get live market data (spot prices)"""
     return {
         "category": "current",
         "description": "Live spot market data",
@@ -431,6 +374,7 @@ async def get_live_data():
 
 @app.get("/api/near-futures")
 async def get_near_futures():
+    """Get near futures (current month: 0-35 days expiry)"""
     return {
         "category": "near",
         "description": "Current month futures (0-35 days)",
@@ -441,6 +385,7 @@ async def get_near_futures():
 
 @app.get("/api/next-futures")
 async def get_next_futures():
+    """Get next futures (next month: 36-70 days expiry)"""
     return {
         "category": "next",
         "description": "Next month futures (36-70 days)",
@@ -451,6 +396,7 @@ async def get_next_futures():
 
 @app.get("/api/far-futures")
 async def get_far_futures():
+    """Get far futures (far month: 71-105 days expiry)"""
     return {
         "category": "far",
         "description": "Far month futures (71-105 days)",
@@ -459,9 +405,40 @@ async def get_far_futures():
         "count": len(cache.far_data)
     }
 
+# Server-Sent Events endpoint for real-time streaming
+@app.get("/api/stream")
+async def stream_futures():
+    """Stream real-time futures data using Server-Sent Events"""
+    async def event_generator():
+        while True:
+            try:
+                all_data = cache.get_all()
+                data_json = json.dumps({
+                    "current": all_data["current"],
+                    "near": all_data["near"],
+                    "next": all_data["next"],
+                    "far": all_data["far"],
+                    "timestamp": all_data["timestamp"]
+                })
+                yield f"data: {data_json}\n\n"
+                await asyncio.sleep(0.5)  # Stream every 0.5 seconds
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                await asyncio.sleep(2)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 @app.get("/api/health")
 async def health_check():
-    """Health check with connection stats"""
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": time.time(),
@@ -471,32 +448,25 @@ async def health_check():
             "near": len(cache.near_data),
             "next": len(cache.next_data),
             "far": len(cache.far_data)
-        },
-        "connections": connection_manager.get_stats()
+        }
     }
 
 @app.get("/")
 async def root():
+    """Root endpoint with API info"""
     return {
-        "api": "Optimized Real-Time Futures Streaming API",
-        "version": "4.0.0",
-        "optimizations": [
-            "Pre-serialized JSON cache",
-            "Connection limits (50 max, 5 per IP)",
-            "Reduced SSE frequency (2s)",
-            "Connection tracking"
-        ],
+        "api": "Real-Time Futures Streaming API",
+        "version": "3.0.0",
         "endpoints": {
             "all_futures": "/api/all-futures-combined",
-            "current": "/api/live-data",
-            "near": "/api/near-futures",
-            "next": "/api/next-futures",
-            "far": "/api/far-futures",
+            "current": "/api/live-data (Live spot prices)",
+            "near": "/api/near-futures (0-35 days)",
+            "next": "/api/next-futures (36-70 days)",
+            "far": "/api/far-futures (71-105 days)",
             "stream": "/api/stream (SSE)",
             "health": "/api/health"
         },
-        "status": "running",
-        "connections": connection_manager.get_stats()
+        "status": "running"
     }
 
 if __name__ == "__main__":
