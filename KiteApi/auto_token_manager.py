@@ -326,35 +326,50 @@ class LightweightKiteTokenManager:
                     time.sleep(1)  # Wait for scroll
                     submit_button.click()
                 
-                # Wait for redirect and extract request token
-                logger.info("Waiting for redirect and request token...")
-                time.sleep(5)  # Wait for redirect
+                # Wait a moment for submission
+                time.sleep(3)
                 
-                # Log current URL for debugging
+                # CRITICAL: Extract request token BEFORE redirect error
+                logger.info("Checking for request token in current URL...")
                 current_url = driver.current_url
                 logger.info(f"Current URL: {current_url}")
-                logger.info(f"Page title: {driver.title}")
                 
                 # Save page source for debugging if needed
-                if "request_token" not in current_url:
-                    logger.warning("Request token not found in URL, saving page source for debugging...")
-                    with open("/tmp/kite_login_debug.html", "w") as f:
-                        f.write(driver.page_source)
-                    # Also save screenshot if possible
-                    try:
-                        driver.save_screenshot("/tmp/kite_login_debug.png")
-                        logger.info("Saved debug screenshot to /tmp/kite_login_debug.png")
-                    except Exception as screenshot_error:
-                        logger.warning(f"Could not save screenshot: {screenshot_error}")
+                logger.info(f"Page title: {driver.title}")
+                with open("/tmp/kite_login_debug.html", "w") as f:
+                    f.write(driver.page_source)
                 
-                # Extract request token from URL
+                # Extract request token from URL (even if it's an error page)
                 from urllib.parse import parse_qs, urlparse
                 parsed_url = urlparse(current_url)
                 query_params = parse_qs(parsed_url.query)
                 
                 request_token = query_params.get('request_token', [None])[0]
+                
+                # Also check in the error page URL if present
                 if not request_token:
-                    raise Exception(f"Request token not found in URL. Current URL: {current_url}")
+                    # Check if there's a URL in the error page
+                    try:
+                        error_url_element = driver.find_element(By.XPATH, "//a[contains(@href, 'request_token')]")
+                        error_url = error_url_element.get_attribute("href")
+                        logger.info(f"Found request token URL in error page: {error_url}")
+                        error_parsed = urlparse(error_url)
+                        error_params = parse_qs(error_parsed.query)
+                        request_token = error_params.get('request_token', [None])[0]
+                    except:
+                        pass
+                
+                if not request_token:
+                    # Try to find request token in page source
+                    page_source = driver.page_source
+                    import re
+                    token_match = re.search(r'request_token=([^&"\']*)', page_source)
+                    if token_match:
+                        request_token = token_match.group(1)
+                        logger.info("Found request token in page source")
+                
+                if not request_token:
+                    raise Exception(f"Request token not found in URL or page. Current URL: {current_url}")
                 
                 logger.info(f"Successfully extracted request token: {request_token[:10]}...")
                 
@@ -379,7 +394,23 @@ class LightweightKiteTokenManager:
             logger.error(f"Automated token generation failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return None
+            
+            # Even if we get an error, check if we have a request token
+            try:
+                current_url = driver.current_url
+                logger.info(f"Final URL before error: {current_url}")
+                
+                from urllib.parse import parse_qs, urlparse
+                parsed_url = urlparse(current_url)
+                query_params = parse_qs(parsed_url.query)
+                request_token = query_params.get('request_token', [None])[0]
+                
+                if request_token:
+                    logger.info(f"Successfully recovered request token despite error: {request_token[:10]}...")
+                else:
+                    return None
+            except:
+                return None
     
     def _convert_request_to_access_token(self, request_token: str) -> Optional[str]:
         """Convert request token to access token"""
