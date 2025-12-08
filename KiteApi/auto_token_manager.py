@@ -144,6 +144,7 @@ class LightweightKiteTokenManager:
             from selenium.webdriver.support import expected_conditions as EC
             import geckodriver_autoinstaller
             import time
+            import os
             
             # Setup Firefox options
             firefox_options = Options()
@@ -151,8 +152,15 @@ class LightweightKiteTokenManager:
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
             
-            # Auto install geckodriver
-            geckodriver_autoinstaller.install()
+            # Auto install geckodriver with error handling
+            try:
+                geckodriver_autoinstaller.install()
+            except PermissionError:
+                logger.warning("Permission denied for geckodriver installation, trying alternative...")
+                # Try to use system geckodriver
+                pass
+            except Exception as e:
+                logger.warning(f"Geckodriver installation warning: {e}")
             
             # Initialize Firefox driver
             logger.info("Initializing Firefox WebDriver...")
