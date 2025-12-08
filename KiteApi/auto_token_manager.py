@@ -365,6 +365,8 @@ class LightweightKiteTokenManager:
                     
                     if request_token:
                         logger.info(f"SUCCESS: Got request token before any errors: {request_token[:10]}...")
+                        # Save request token temporarily in case of errors
+                        self._temp_request_token = request_token
                     else:
                         logger.warning("No request token in URL yet, continuing...")
                 except Exception as url_error:
@@ -447,36 +449,36 @@ class LightweightKiteTokenManager:
             import traceback
             logger.error(traceback.format_exc())
             
-            # Even if we get an error, check if we have a request token
+            # Even if we get a WebDriver error, check if we have a request token and convert it
             try:
-                current_url = driver.current_url
-                logger.info(f"Final URL before error: {current_url}")
-                
-                from urllib.parse import parse_qs, urlparse
-                parsed_url = urlparse(current_url)
-                query_params = parse_qs(parsed_url.query)
-                request_token = query_params.get('request_token', [None])[0]
-                
-                if request_token:
-                    logger.info(f"Successfully recovered request token despite error: {request_token[:10]}...")
-                    # Continue with token conversion
-                    access_token = self._convert_request_to_access_token(request_token)
-                    return access_token
-                else:
-                    return None
-            except:
-                # Try to get token from the error message
-                error_msg = str(e)
-                if "request_token=" in error_msg:
+                # Try to extract request token from the error message itself
+                error_str = str(e)
+                if "request_token=" in error_str:
                     import re
-                    token_match = re.search(r'request_token=([^&"\']*)', error_msg)
+                    token_match = re.search(r'request_token=([^&"\']*)', error_str)
                     if token_match:
                         request_token = token_match.group(1)
-                        logger.info(f"Recovered request token from error message: {request_token[:10]}...")
-                        # Continue with token conversion
+                        logger.info(f"Recovered request token from error: {request_token[:10]}...")
+                        
+                        # Convert to access token
                         access_token = self._convert_request_to_access_token(request_token)
+                        if access_token:
+                            logger.info("✅ Successfully converted request token to access token despite WebDriver error!")
+                            return access_token
+                        else:
+                            logger.error("❌ Failed to convert request token to access token")
+                            return None
+                
+                # If not in error message, try to get from current state
+                if hasattr(self, '_temp_request_token') and self._temp_request_token:
+                    access_token = self._convert_request_to_access_token(self._temp_request_token)
+                    if access_token:
+                        logger.info("✅ Successfully converted cached request token to access token!")
                         return access_token
-                return None
+            except Exception as conversion_error:
+                logger.error(f"Failed to convert token despite successful extraction: {conversion_error}")
+                
+            return None
     
     def _convert_request_to_access_token(self, request_token: str) -> Optional[str]:
         """Convert request token to access token"""
