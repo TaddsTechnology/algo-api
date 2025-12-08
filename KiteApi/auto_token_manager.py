@@ -143,6 +143,7 @@ class LightweightKiteTokenManager:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException, NoSuchElementException
             import geckodriver_autoinstaller
             import time
             import os
@@ -152,13 +153,13 @@ class LightweightKiteTokenManager:
             firefox_options.add_argument("--headless")  # Run in background
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
+            firefox_options.add_argument("--disable-dev-tools")
             
             # Auto install geckodriver with error handling
             try:
                 geckodriver_autoinstaller.install()
             except PermissionError:
                 logger.warning("Permission denied for geckodriver installation, using system geckodriver...")
-                # Continue anyway, system geckodriver might be available
             except Exception as e:
                 logger.warning(f"Geckodriver installation warning: {e}")
             
@@ -172,65 +173,150 @@ class LightweightKiteTokenManager:
                 # Try without explicit service
                 driver = webdriver.Firefox(options=firefox_options)
             
+            # Set implicit wait
+            driver.implicitly_wait(10)
+            
             try:
                 # Step 1: Go to Kite login
-                login_url = f"https://kite.trade/connect/login?api_key={self.api_key}&v=3"
-                driver.get(login_url)
+                logger.info("Navigating to Kite login page...")
+                driver.get(f"https://kite.zerodha.com/connect/login?api_key={self.api_key}")
                 
-                # Step 2: Login
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "userid"))
+                # Wait for and fill user ID with robust waiting
+                logger.info("Waiting for user ID field...")
+                user_id_field = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//input[@id='userid' or @placeholder='User ID (eg: AB1234)' or @type='text']"))
                 )
+                user_id_field.clear()
+                user_id_field.send_keys(self.user_id)
                 
-                driver.find_element(By.ID, "userid").send_keys(self.user_id)
-                driver.find_element(By.ID, "password").send_keys(self.password)
-                driver.find_element(By.CLASS_NAME, "button-orange").click()
-                
-                # Step 3: Enter PIN/TOTP
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "pin"))
+                # Wait for and fill password with robust waiting
+                logger.info("Waiting for password field...")
+                password_field = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//input[@id='password' or @placeholder='Password' or @type='password']"))
                 )
+                password_field.clear()
+                password_field.send_keys(self.password)
                 
-                # Generate TOTP if secret is provided, otherwise use static PIN
-                if self.totp_secret and TOTP_AVAILABLE:
-                    totp = pyotp.TOTP(self.totp_secret)
-                    pin_value = totp.now()
-                    logger.info(f"Generated TOTP code: {pin_value}")
-                elif self.pin:
-                    pin_value = self.pin
-                    logger.info("Using static PIN")
-                else:
-                    logger.error("No PIN or TOTP secret provided")
-                    return None
-                
-                driver.find_element(By.ID, "pin").send_keys(pin_value)
-                driver.find_element(By.CLASS_NAME, "button-orange").click()
-                
-                # Step 4: Wait for redirect and extract request_token
-                WebDriverWait(driver, 15).until(
-                    lambda d: "request_token=" in d.current_url
+                # Click login button
+                logger.info("Clicking login button...")
+                login_button = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[@type='submit' or contains(text(), 'Login') or contains(@class, 'button')]"))
                 )
+                login_button.click()
                 
-                current_url = driver.current_url
-                logger.info(f"Redirect URL: {current_url}")
+                # Wait for PIN/TOTP field (could be either)
+                logger.info("Waiting for PIN/TOTP field...")
+                time.sleep(2)  # Brief pause for transition
                 
-                # Extract request_token
-                if "request_token=" in current_url:
-                    request_token = current_url.split("request_token=")[1].split("&")[0]
-                    logger.info(f"Request token extracted: {request_token[:20]}...")
+                # Try multiple selectors for PIN/TOTP field
+                pin_field = None
+                totp_selectors = [
+                    "//input[@id='pin' or @id='totp' or @id='twofa' or @placeholder='TWO FA' or @placeholder='PIN']",
+                    "//input[@type='number' or @type='text' and contains(@placeholder, 'PIN')]",
+                    "//input[contains(@class, 'pin') or contains(@class, 'totp')]"
+                ]
+                
+                for selector in totp_selectors:
+                    try:
+                        pin_field = WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+                        if pin_field:
+                            logger.info(f"Found PIN/TOTP field with selector: {selector}")
+                            break
+                    except TimeoutException:
+                        continue
+                
+                if not pin_field:
+                    raise TimeoutException("Could not find PIN/TOTP field")
+                
+                # Generate TOTP code
+                logger.info("Generating TOTP code...")
+                import pyotp
+                totp = pyotp.TOTP(self.totp_secret)
+                totp_code = totp.now()
+                
+                # Fill PIN/TOTP field
+                pin_field.clear()
+                pin_field.send_keys(totp_code)
+                
+                # Click continue/submit button
+                logger.info("Submitting TOTP code...")
+                submit_buttons = [
+                    "//button[@type='submit' or contains(text(), 'Continue') or contains(text(), 'Submit')]",
+                    "//button[contains(@class, 'button')]"
+                ]
+                
+                submit_button = None
+                for selector in submit_buttons:
+                    try:
+                        submit_button = WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+                        if submit_button:
+                            logger.info(f"Found submit button with selector: {selector}")
+                            break
+                    except TimeoutException:
+                        continue
+                
+                if not submit_button:
+                    raise TimeoutException("Could not find submit button")
                     
-                    # Convert to access token
-                    access_token = self._convert_request_to_access_token(request_token)
-                    return access_token
+                submit_button.click()
                 
-                logger.error("Could not extract request_token from URL")
-                return None
+                # Wait for redirect and extract request token
+                logger.info("Waiting for redirect and request token...")
+                time.sleep(5)  # Wait for redirect
+                
+                # Log current URL for debugging
+                current_url = driver.current_url
+                logger.info(f"Current URL: {current_url}")
+                logger.info(f"Page title: {driver.title}")
+                
+                # Save page source for debugging if needed
+                if "request_token" not in current_url:
+                    logger.warning("Request token not found in URL, saving page source for debugging...")
+                    with open("/tmp/kite_login_debug.html", "w") as f:
+                        f.write(driver.page_source)
+                    # Also save screenshot if possible
+                    try:
+                        driver.save_screenshot("/tmp/kite_login_debug.png")
+                        logger.info("Saved debug screenshot to /tmp/kite_login_debug.png")
+                    except Exception as screenshot_error:
+                        logger.warning(f"Could not save screenshot: {screenshot_error}")
+                
+                # Extract request token from URL
+                from urllib.parse import parse_qs, urlparse
+                parsed_url = urlparse(current_url)
+                query_params = parse_qs(parsed_url.query)
+                
+                request_token = query_params.get('request_token', [None])[0]
+                if not request_token:
+                    raise Exception(f"Request token not found in URL. Current URL: {current_url}")
+                
+                logger.info(f"Successfully extracted request token: {request_token[:10]}...")
+                
+                # Step 2: Exchange request token for access token
+                logger.info("Exchanging request token for access token...")
+                from kiteconnect import KiteConnect
+                kite = KiteConnect(api_key=self.api_key)
+                data = kite.generate_session(request_token, api_secret=self.api_secret)
+                access_token = data["access_token"]
+                
+                logger.info("✅ Successfully generated access token!")
+                return access_token
                 
             finally:
-                driver.quit()
-                
+                # Close driver
+                try:
+                    driver.quit()
+                except Exception as e:
+                    logger.warning(f"Error closing driver: {e}")
+                    
         except Exception as e:
             logger.error(f"Automated token generation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def _convert_request_to_access_token(self, request_token: str) -> Optional[str]:

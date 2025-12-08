@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Install system dependencies including Firefox
+# Install system dependencies including Firefox and tools
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -8,9 +8,19 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     gnupg \
+    jq \
     firefox-esr \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# Install geckodriver
+RUN cd /tmp && \
+    GECKO_VER="$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | jq -r .tag_name)" && \
+    wget "https://github.com/mozilla/geckodriver/releases/download/${GECKO_VER}/geckodriver-${GECKO_VER}-linux64.tar.gz" && \
+    tar -xzf geckodriver-*.tar.gz && \
+    mv geckodriver /usr/local/bin/ && \
+    chown root:root /usr/local/bin/geckodriver && \
+    chmod 0755 /usr/local/bin/geckodriver
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser
