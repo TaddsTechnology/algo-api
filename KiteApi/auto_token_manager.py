@@ -430,9 +430,23 @@ class LightweightKiteTokenManager:
                 
                 if request_token:
                     logger.info(f"Successfully recovered request token despite error: {request_token[:10]}...")
+                    # Continue with token conversion
+                    access_token = self._convert_request_to_access_token(request_token)
+                    return access_token
                 else:
                     return None
             except:
+                # Try to get token from the error message
+                error_msg = str(e)
+                if "request_token=" in error_msg:
+                    import re
+                    token_match = re.search(r'request_token=([^&"\']*)', error_msg)
+                    if token_match:
+                        request_token = token_match.group(1)
+                        logger.info(f"Recovered request token from error message: {request_token[:10]}...")
+                        # Continue with token conversion
+                        access_token = self._convert_request_to_access_token(request_token)
+                        return access_token
                 return None
     
     def _convert_request_to_access_token(self, request_token: str) -> Optional[str]:
