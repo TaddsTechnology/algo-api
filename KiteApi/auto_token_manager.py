@@ -136,9 +136,10 @@ class LightweightKiteTokenManager:
         logger.info("Starting automated token generation...")
         
         try:
-            # Use Firefox instead of Chrome for better HF Space compatibility
+            # Force Firefox usage for HF Space compatibility
             from selenium import webdriver
-            from selenium.webdriver.firefox.options import Options
+            from selenium.webdriver.firefox.service import Service as FirefoxService
+            from selenium.webdriver.firefox.options import Options as FirefoxOptions
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
@@ -147,7 +148,7 @@ class LightweightKiteTokenManager:
             import os
             
             # Setup Firefox options
-            firefox_options = Options()
+            firefox_options = FirefoxOptions()
             firefox_options.add_argument("--headless")  # Run in background
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
@@ -156,15 +157,20 @@ class LightweightKiteTokenManager:
             try:
                 geckodriver_autoinstaller.install()
             except PermissionError:
-                logger.warning("Permission denied for geckodriver installation, trying alternative...")
-                # Try to use system geckodriver
-                pass
+                logger.warning("Permission denied for geckodriver installation, using system geckodriver...")
+                # Continue anyway, system geckodriver might be available
             except Exception as e:
                 logger.warning(f"Geckodriver installation warning: {e}")
             
-            # Initialize Firefox driver
+            # Initialize Firefox driver with explicit service
             logger.info("Initializing Firefox WebDriver...")
-            driver = webdriver.Firefox(options=firefox_options)
+            try:
+                service = FirefoxService()
+                driver = webdriver.Firefox(service=service, options=firefox_options)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Firefox with service: {e}")
+                # Try without explicit service
+                driver = webdriver.Firefox(options=firefox_options)
             
             try:
                 # Step 1: Go to Kite login
