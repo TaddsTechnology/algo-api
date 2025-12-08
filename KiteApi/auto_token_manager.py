@@ -141,6 +141,7 @@ class LightweightKiteTokenManager:
             from selenium.webdriver.firefox.service import Service as FirefoxService
             from selenium.webdriver.firefox.options import Options as FirefoxOptions
             from selenium.webdriver.common.by import By
+            from selenium.webdriver.common.keys import Keys
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.common.exceptions import TimeoutException, NoSuchElementException
@@ -243,26 +244,55 @@ class LightweightKiteTokenManager:
                 # Click continue/submit button
                 logger.info("Submitting TOTP code...")
                 submit_buttons = [
-                    "//button[@type='submit' or contains(text(), 'Continue') or contains(text(), 'Submit')]",
-                    "//button[contains(@class, 'button')]"
+                    "//button[@type='submit' or contains(text(), 'Continue') or contains(text(), 'Submit') or contains(text(), 'Login')]",
+                    "//button[contains(@class, 'button') or contains(@class, 'btn') or contains(@class, 'submit')]",
+                    "//input[@type='submit']",
+                    "//button",
+                    "//input[@type='button' and contains(@value, 'Continue') or contains(@value, 'Submit') or contains(@value, 'Login')]"
                 ]
                 
                 submit_button = None
                 for selector in submit_buttons:
                     try:
-                        submit_button = WebDriverWait(driver, 10).until(
+                        submit_button = WebDriverWait(driver, 15).until(
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
                         if submit_button:
                             logger.info(f"Found submit button with selector: {selector}")
+                            # Log button text for debugging
+                            button_text = submit_button.text
+                            button_value = submit_button.get_attribute("value")
+                            logger.info(f"Button text: '{button_text}', value: '{button_value}'")
                             break
                     except TimeoutException:
                         continue
                 
                 if not submit_button:
-                    raise TimeoutException("Could not find submit button")
-                    
-                submit_button.click()
+                    logger.warning("Could not find submit button with explicit search, trying to find any clickable button...")
+                    # Try to find any button and click the first one
+                    try:
+                        buttons = WebDriverWait(driver, 10).until(
+                            EC.presence_of_all_elements_located((By.TAG_NAME, "button"))
+                        )
+                        if buttons:
+                            submit_button = buttons[0]
+                            logger.info(f"Found {len(buttons)} buttons, clicking the first one")
+                            button_text = submit_button.text
+                            button_value = submit_button.get_attribute("value")
+                            logger.info(f"First button text: '{button_text}', value: '{button_value}'")
+                        else:
+                            raise TimeoutException("No buttons found on page")
+                    except TimeoutException:
+                        # Last resort: try pressing Enter in the TOTP field
+                        logger.warning("No buttons found, trying to submit by pressing Enter in TOTP field...")
+                        pin_field.send_keys(Keys.RETURN)
+                        time.sleep(3)  # Wait for submission
+                
+                if submit_button:
+                    # Scroll to button and click
+                    driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
+                    time.sleep(1)  # Wait for scroll
+                    submit_button.click()
                 
                 # Wait for redirect and extract request token
                 logger.info("Waiting for redirect and request token...")
