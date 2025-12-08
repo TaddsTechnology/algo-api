@@ -4,13 +4,54 @@ Optimized Streaming API for Real-Time Market Data
 Uses Server-Sent Events (SSE) for continuous data streaming
 """
 
+import os
+import sys
+
+def initialize_kite_credentials():
+    """Initialize Kite credentials if missing"""
+    if not os.environ.get('KITE_ACCESS_TOKEN') or os.environ.get('KITE_ACCESS_TOKEN') == "":
+        try:
+            print("⚠️ KITE_ACCESS_TOKEN missing, triggering auto-generation...")
+            # Add project root to path
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            kiteapi_path = os.path.join(project_root, 'KiteApi')
+            
+            # Add paths to sys.path
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            if kiteapi_path not in sys.path:
+                sys.path.insert(0, kiteapi_path)
+            
+            # Run auto token generation
+            from auto_token_manager import setup_lightweight_kite_manager
+            
+            manager = setup_lightweight_kite_manager()
+            if manager:
+                token = manager.get_valid_token()
+                if token:
+                    # Set environment variable for current session
+                    os.environ['KITE_ACCESS_TOKEN'] = token
+                    print("✅ Auto token generation successful")
+                    return True
+                else:
+                    print("❌ Auto token generation failed")
+            else:
+                print("❌ Failed to setup token manager")
+        except Exception as e:
+            print(f"❌ Auto initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+    return False
+
+# Try to initialize credentials before importing other modules
+credentials_initialized = initialize_kite_credentials()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 import asyncio
 import json
-import os
 import time
 from datetime import datetime
 
@@ -82,7 +123,13 @@ def get_api_credentials():
             api_key = config.API_KEY
             access_token = config.ACCESS_TOKEN
         except:
-            pass
+            # Try kite_config.py as fallback
+            try:
+                import kite_config
+                api_key = kite_config.API_KEY
+                access_token = kite_config.ACCESS_TOKEN
+            except:
+                pass
     
     return api_key, access_token
 
