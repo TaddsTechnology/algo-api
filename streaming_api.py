@@ -80,55 +80,13 @@ app.add_middleware(
 # Global cache for market data
 class MarketDataCache:
     def __init__(self):
-        # Try to initialize Redis client
-        try:
-            from redis_config import get_redis_client
-            self.redis_client = get_redis_client()
-            if self.redis_client:
-                print("✅ Redis client initialized successfully")
-            else:
-                print("⚠️  Failed to initialize Redis client, falling back to in-memory cache")
-                self.redis_client = None
-        except ImportError:
-            print("⚠️  Redis config not found, falling back to in-memory cache")
-            self.redis_client = None
-        except Exception as e:
-            print(f"⚠️  Error initializing Redis client: {e}, falling back to in-memory cache")
-            self.redis_client = None
-            
-        # Fallback to in-memory cache if Redis is not available
-        if not self.redis_client:
-            self._init_in_memory_cache()
-        
-    def _init_in_memory_cache(self):
-        """Initialize in-memory cache as fallback"""
         self.current_data = {}  # Live market data (spot prices)
         self.near_data = {}     # Current month futures (0-35 days)
         self.next_data = {}     # Next month futures (36-70 days)
         self.far_data = {}      # Far month futures (71-105 days)
         self.last_update = time.time()
         
-    def _get_cache_key(self, category):
-        """Generate Redis key for a category"""
-        return f"market_data:{category}"
-        
     def update(self, category, data):
-        """Update cache with new data"""
-        if self.redis_client:
-            try:
-                # Store in Redis with expiration (5 minutes)
-                key = self._get_cache_key(category)
-                self.redis_client.setex(key, 300, json.dumps(data))
-                # Also store last update time
-                self.redis_client.setex("market_data:last_update", 300, time.time())
-            except Exception as e:
-                print(f"⚠️  Redis update failed: {e}, falling back to in-memory")
-                self._fallback_update(category, data)
-        else:
-            self._fallback_update(category, data)
-    
-    def _fallback_update(self, category, data):
-        """Fallback to in-memory cache"""
         if category == "current":
             self.current_data = data
         elif category == "near":
@@ -138,50 +96,8 @@ class MarketDataCache:
         elif category == "far":
             self.far_data = data
         self.last_update = time.time()
-            
+    
     def get_all(self):
-        """Get all cached data"""
-        if self.redis_client:
-            try:
-                current_data = self._get_category_data("current")
-                near_data = self._get_category_data("near")
-                next_data = self._get_category_data("next")
-                far_data = self._get_category_data("far")
-                
-                # Get last update time
-                last_update = self.redis_client.get("market_data:last_update")
-                if last_update:
-                    last_update = float(last_update)
-                else:
-                    last_update = time.time()
-                    
-                return {
-                    "current": current_data or {},
-                    "near": near_data or {},
-                    "next": next_data or {},
-                    "far": far_data or {},
-                    "timestamp": last_update
-                }
-            except Exception as e:
-                print(f"⚠️  Redis get_all failed: {e}, falling back to in-memory")
-                return self._fallback_get_all()
-        else:
-            return self._fallback_get_all()
-            
-    def _get_category_data(self, category):
-        """Get data for a specific category from Redis"""
-        try:
-            key = self._get_cache_key(category)
-            data_str = self.redis_client.get(key)
-            if data_str:
-                return json.loads(data_str)
-            return {}
-        except Exception as e:
-            print(f"⚠️  Redis get failed for {category}: {e}")
-            return {}
-            
-    def _fallback_get_all(self):
-        """Fallback to in-memory cache"""
         return {
             "current": self.current_data,
             "near": self.near_data,
@@ -409,21 +325,14 @@ async def update_equity_depth_http():
             
             if equity_data:
                 # Update only bid/ask in cache while keeping WebSocket LTP/volume
-                all_cached_data = cache.get_all()
-                current_data = all_cached_data.get("current", {})
-                
-                # Update current data with new bid/ask values
                 for symbol, data in equity_data.items():
-                    if symbol in current_data:
+                    if symbol in cache.current_data:
                         # Merge: keep WebSocket LTP but use HTTP bid/ask
-                        current_data[symbol]['bid'] = data.get('bid', 0)
-                        current_data[symbol]['ask'] = data.get('ask', 0)
+                        cache.current_data[symbol]['bid'] = data.get('bid', 0)
+                        cache.current_data[symbol]['ask'] = data.get('ask', 0)
                     else:
                         # New entry from HTTP
-                        current_data[symbol] = data
-                
-                # Update cache with modified current data
-                cache.update("current", current_data)
+                        cache.current_data[symbol] = data
                 
                 print(f"✅ Updated bid/ask for {len(equity_data)} equity instruments")
             

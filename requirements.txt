@@ -35,6 +35,3 @@ pyotp>=2.9.0
 
 # Firefox WebDriver for HF Spaces
 geckodriver-autoinstaller>=0.1.0
-
-# Redis for caching
-redis>=4.5.0
