@@ -409,14 +409,21 @@ async def update_equity_depth_http():
             
             if equity_data:
                 # Update only bid/ask in cache while keeping WebSocket LTP/volume
+                all_cached_data = cache.get_all()
+                current_data = all_cached_data.get("current", {})
+                
+                # Update current data with new bid/ask values
                 for symbol, data in equity_data.items():
-                    if symbol in cache.current_data:
+                    if symbol in current_data:
                         # Merge: keep WebSocket LTP but use HTTP bid/ask
-                        cache.current_data[symbol]['bid'] = data.get('bid', 0)
-                        cache.current_data[symbol]['ask'] = data.get('ask', 0)
+                        current_data[symbol]['bid'] = data.get('bid', 0)
+                        current_data[symbol]['ask'] = data.get('ask', 0)
                     else:
                         # New entry from HTTP
-                        cache.current_data[symbol] = data
+                        current_data[symbol] = data
+                
+                # Update cache with modified current data
+                cache.update("current", current_data)
                 
                 print(f"✅ Updated bid/ask for {len(equity_data)} equity instruments")
             
