@@ -320,6 +320,29 @@ class LightweightKiteTokenManager:
                         pin_field.send_keys(Keys.RETURN)
                         time.sleep(3)  # Wait for submission
                 
+                # Wait a moment for submission
+                time.sleep(2)
+                
+                # IMMEDIATELY extract request token BEFORE any potential redirect errors
+                logger.info("Immediately extracting request token...")
+                try:
+                    current_url = driver.current_url
+                    logger.info(f"Current URL: {current_url}")
+                    
+                    from urllib.parse import parse_qs, urlparse
+                    parsed_url = urlparse(current_url)
+                    query_params = parse_qs(parsed_url.query)
+                    request_token = query_params.get('request_token', [None])[0]
+                    
+                    if request_token:
+                        logger.info(f"SUCCESS: Got request token before any errors: {request_token[:10]}...")
+                    else:
+                        logger.warning("No request token in URL yet, continuing...")
+                except Exception as url_error:
+                    logger.warning(f"Could not get URL immediately: {url_error}")
+                    request_token = None
+                
+                # NOW click submit button
                 if submit_button:
                     # Scroll to button and click
                     driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
