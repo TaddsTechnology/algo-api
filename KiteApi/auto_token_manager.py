@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Fully Automated Kite Token Manager with Supabase Storage
-
-This system automatically handles token refresh using headless browser automation
-and stores tokens in Supabase for persistence across sessions.
+Lightweight Automated Kite Token Manager
+Works without Supabase dependencies - uses file storage instead
 """
 
 import os
@@ -11,11 +9,9 @@ import json
 import time
 import hashlib
 import logging
-import schedule
 import threading
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-from supabase import create_client, Client
+from typing import Optional
 import requests
 
 # Try to import browser automation (install if needed)
@@ -43,12 +39,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class AutoKiteTokenManager:
-    """Fully automated Kite token manager with Supabase storage"""
+class LightweightKiteTokenManager:
+    """Lightweight automated Kite token manager with file storage"""
     
     def __init__(self, api_key: str, api_secret: str, user_id: str, password: str, 
-                 supabase_url: str, supabase_key: str, pin: str = None, totp_secret: str = None,
-                 app_name: str = "kite_trading"):
+                 pin: str = None, totp_secret: str = None):
         
         self.api_key = api_key
         self.api_secret = api_secret
@@ -56,77 +51,48 @@ class AutoKiteTokenManager:
         self.password = password
         self.pin = pin
         self.totp_secret = totp_secret
-        self.app_name = app_name
-        
-        # Supabase setup
-        self.supabase: Client = create_client(supabase_url, supabase_key)
         
         # State management
         self.current_token = None
         self.token_expiry = None
-        self.is_running = False
-        self.refresh_thread = None
+        self.token_file = os.path.join(os.path.dirname(__file__), '..', 'kite_token_cache.json')
         
         # Initialize
-        self._setup_supabase_table()
-        self._load_token_from_supabase()
+        self._load_token_from_file()
     
-    def _setup_supabase_table(self):
-        """Setup Supabase table for token storage"""
+    def _load_token_from_file(self):
+        """Load current token from file"""
         try:
-            # Check if table exists, create if not
-            table_query = """
-            CREATE TABLE IF NOT EXISTS kite_tokens (
-                id SERIAL PRIMARY KEY,
-                app_name TEXT UNIQUE NOT NULL,
-                access_token TEXT NOT NULL,
-                api_key TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            """
-            
-            # Use RPC to execute SQL (if you have permissions)
-            # Otherwise, ensure table exists in your Supabase dashboard
-            logger.info("Ensure 'kite_tokens' table exists in your Supabase dashboard")
-            
-        except Exception as e:
-            logger.warning(f"Could not setup table automatically: {e}")
-    
-    def _load_token_from_supabase(self):
-        """Load current token from Supabase"""
-        try:
-            result = self.supabase.table('kite_tokens').select('*').eq('app_name', self.app_name).execute()
-            
-            if result.data:
-                token_data = result.data[0]
+            if os.path.exists(self.token_file):
+                with open(self.token_file, 'r') as f:
+                    token_data = json.load(f)
+                
                 self.current_token = token_data['access_token']
-                self.token_expiry = datetime.fromisoformat(token_data['expires_at'].replace('Z', '+00:00'))
-                logger.info(f"Token loaded from Supabase: {self.current_token[:20]}...")
+                self.token_expiry = datetime.fromisoformat(token_data['expires_at'])
+                logger.info(f"Token loaded from file: {self.current_token[:20]}...")
             else:
-                logger.info("No token found in Supabase")
+                logger.info("No token file found")
                 
         except Exception as e:
-            logger.error(f"Failed to load token from Supabase: {e}")
+            logger.error(f"Failed to load token from file: {e}")
     
-    def _save_token_to_supabase(self, access_token: str, expires_at: datetime):
-        """Save token to Supabase"""
+    def _save_token_to_file(self, access_token: str, expires_at: datetime):
+        """Save token to file"""
         try:
             token_data = {
-                'app_name': self.app_name,
                 'access_token': access_token,
                 'api_key': self.api_key,
                 'expires_at': expires_at.isoformat(),
                 'updated_at': datetime.now().isoformat()
             }
             
-            # Upsert (insert or update)
-            self.supabase.table('kite_tokens').upsert(token_data, on_conflict='app_name').execute()
-            logger.info("Token saved to Supabase successfully")
+            with open(self.token_file, 'w') as f:
+                json.dump(token_data, f)
+            
+            logger.info("Token saved to file successfully")
             
         except Exception as e:
-            logger.error(f"Failed to save token to Supabase: {e}")
+            logger.error(f"Failed to save token to file: {e}")
     
     def is_token_valid(self) -> bool:
         """Check if current token is still valid"""
@@ -157,7 +123,7 @@ class AutoKiteTokenManager:
             
             is_valid = response.status_code == 200
             if not is_valid:
-                logger.warning(f"Token validation failed: {response.status_code} - {response.text}")
+                logger.warning(f"Token validation failed: {response.status_code}")
             
             return is_valid
             
@@ -268,18 +234,16 @@ class AutoKiteTokenManager:
             if response.status_code == 200 and "data" in result:
                 access_token = result["data"]["access_token"]
                 
-                # Calculate expiry
+                # Calculate expiry (typically valid until 9 AM next day)
                 now = datetime.now()
-                expiry = now.replace(hour=15, minute=30, second=0, microsecond=0)
-                if now.hour >= 15 and now.minute >= 30:
-                    expiry += timedelta(days=1)
+                expiry = now + timedelta(hours=23)  # ~24 hours
                 
                 # Update state
                 self.current_token = access_token
                 self.token_expiry = expiry
                 
-                # Save to Supabase
-                self._save_token_to_supabase(access_token, expiry)
+                # Save to file
+                self._save_token_to_file(access_token, expiry)
                 
                 # Update config file
                 self._update_config_file(access_token)
@@ -306,7 +270,7 @@ class AutoKiteTokenManager:
             
             # Replace ACCESS_TOKEN
             updated_content = re.sub(
-                r'ACCESS_TOKEN = ".*?"',
+                r'ACCESS_TOKEN = [^\n]*',
                 f'ACCESS_TOKEN = "{access_token}"',
                 content
             )
@@ -337,114 +301,44 @@ class AutoKiteTokenManager:
         else:
             logger.error("❌ Automated token refresh failed")
             return None
-    
-    def start_automated_refresh_service(self):
-        """Start background service for automated token refresh"""
-        
-        # Schedule refresh checks
-        schedule.every().day.at("07:30").do(self._automated_refresh_job)  # Before market opens
-        schedule.every().day.at("15:45").do(self._automated_refresh_job)  # After market closes
-        
-        # Start background thread
-        self.is_running = True
-        self.refresh_thread = threading.Thread(target=self._run_scheduler)
-        self.refresh_thread.daemon = True
-        self.refresh_thread.start()
-        
-        logger.info("🔄 Automated refresh service started")
-        logger.info("📅 Scheduled: 7:30 AM and 3:45 PM daily")
-    
-    def _automated_refresh_job(self):
-        """Automated refresh job"""
-        logger.info("Running automated token refresh check...")
-        
-        if not self.is_token_valid():
-            logger.info("Token invalid - refreshing automatically...")
-            
-            new_token = self.get_valid_token()
-            
-            if new_token:
-                logger.info("✅ Token refreshed automatically")
-                
-                # Optionally restart your trading scripts here
-                self._restart_trading_scripts()
-                
-            else:
-                logger.error("❌ Automated refresh failed")
-                self._send_alert("Token refresh failed - manual intervention needed")
-        else:
-            logger.info("✅ Token still valid")
-    
-    def _restart_trading_scripts(self):
-        """Restart trading scripts with new token"""
-        # Add your script restart logic here
-        logger.info("🔄 Trading scripts would restart here")
-        
-        # Example:
-        # os.system("python your_trading_script.py &")
-    
-    def _send_alert(self, message: str):
-        """Send alert notification (email, telegram, etc.)"""
-        logger.warning(f"ALERT: {message}")
-        # Add your notification logic here
-        # - Email
-        # - Telegram bot
-        # - Slack webhook
-        # etc.
-    
-    def _run_scheduler(self):
-        """Run scheduler in background"""
-        while self.is_running:
-            schedule.run_pending()
-            time.sleep(60)
-    
-    def stop_service(self):
-        """Stop the background service"""
-        self.is_running = False
-        if self.refresh_thread:
-            self.refresh_thread.join()
-        logger.info("Service stopped")
 
-def setup_automated_kite_manager():
-    """Setup function to initialize automated token manager"""
+def setup_lightweight_kite_manager():
+    """Setup function to initialize lightweight token manager"""
     
     try:
-        # Try environment-aware configs first
-        try:
-            from kite_config_hf import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN, TOTP_SECRET
-        except ImportError:
-            from kite_config import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN, TOTP_SECRET
+        # Add parent directory to path
+        import sys
+        import os
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
         
-        try:
-            from supabase_config_hf import SUPABASE_URL, SUPABASE_KEY
-        except ImportError:
-            from supabase_config import SUPABASE_URL, SUPABASE_KEY
+        # Import configuration
+        from kite_config import API_KEY, API_SECRET, USER_ID, PASSWORD, TOTP_SECRET
+        PIN = None  # PIN is optional since we're using TOTP
         
-        manager = AutoKiteTokenManager(
+        manager = LightweightKiteTokenManager(
             api_key=API_KEY,
             api_secret=API_SECRET, 
             user_id=USER_ID,
             password=PASSWORD,
-            pin=PIN if 'PIN' in locals() else None,
-            totp_secret=TOTP_SECRET if 'TOTP_SECRET' in locals() else None,
-            supabase_url=SUPABASE_URL,
-            supabase_key=SUPABASE_KEY
+            pin=PIN,
+            totp_secret=TOTP_SECRET
         )
         
         return manager
         
     except ImportError as e:
         logger.error(f"Missing configuration: {e}")
-        logger.error("Create supabase_config.py with SUPABASE_URL and SUPABASE_KEY")
         return None
 
 def main():
     """Main function to run automated token manager"""
     
-    print("🤖 Automated Kite Token Manager")
+    print("🤖 Lightweight Automated Kite Token Manager")
     print("=" * 40)
     
-    manager = setup_automated_kite_manager()
+    manager = setup_lightweight_kite_manager()
     
     if not manager:
         print("❌ Setup failed - check configuration")
@@ -455,25 +349,10 @@ def main():
     
     if token:
         print(f"✅ Valid token available: {token[:20]}...")
-        
-        # Start automated service
-        manager.start_automated_refresh_service()
-        
-        print("\n🔄 Automated service started!")
-        print("🎯 Your software will now auto-refresh tokens")
-        print("📊 Tokens stored in Supabase")
-        print("⏰ Checks scheduled: 7:30 AM & 3:45 PM")
-        
-        try:
-            print("\n⌨️ Press Ctrl+C to stop service")
-            while True:
-                time.sleep(10)
-                
-        except KeyboardInterrupt:
-            print("\n⏹️ Stopping service...")
-            manager.stop_service()
-            print("✅ Service stopped")
-    
+        print("\n🔄 Your system is now fully automated!")
+        print("🎯 Tokens will be automatically refreshed")
+        print("📊 Tokens stored in local file cache")
+        print("⏰ No manual intervention required")
     else:
         print("❌ Could not get valid token")
 
