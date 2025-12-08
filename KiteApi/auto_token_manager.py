@@ -275,16 +275,48 @@ class LightweightKiteTokenManager:
                             EC.presence_of_all_elements_located((By.TAG_NAME, "button"))
                         )
                         if buttons:
-                            submit_button = buttons[0]
-                            logger.info(f"Found {len(buttons)} buttons, clicking the first one")
-                            button_text = submit_button.text
-                            button_value = submit_button.get_attribute("value")
-                            logger.info(f"First button text: '{button_text}', value: '{button_value}'")
+                            # Filter out invisible/non-interactable buttons
+                            clickable_buttons = []
+                            for i, btn in enumerate(buttons):
+                                try:
+                                    # Check if button is displayed and enabled
+                                    if btn.is_displayed() and btn.is_enabled():
+                                        button_text = btn.text.strip()
+                                        button_value = btn.get_attribute("value") or ""
+                                        button_id = btn.get_attribute("id") or ""
+                                        button_class = btn.get_attribute("class") or ""
+                                        
+                                        logger.info(f"Button {i}: text='{button_text}', value='{button_value}', id='{button_id}', class='{button_class}'")
+                                        
+                                        # Skip reset/pref buttons
+                                        if "reset" in button_text.lower() or "pref" in button_id.lower() or "cancel" in button_text.lower():
+                                            continue
+                                        
+                                        # Prefer buttons with text like "continue", "submit", "login"
+                                        if any(keyword in button_text.lower() or keyword in button_value.lower() for keyword in ["continue", "submit", "login", "proceed"]):
+                                            submit_button = btn
+                                            logger.info(f"Selected submit button with keyword: {button_text}")
+                                            break
+                                        
+                                        clickable_buttons.append(btn)
+                                except Exception as e:
+                                    logger.debug(f"Error checking button {i}: {e}")
+                                    continue
+                            
+                            # If we found a good button, use it
+                            if not submit_button and clickable_buttons:
+                                submit_button = clickable_buttons[0]
+                                logger.info(f"Found {len(clickable_buttons)} clickable buttons, clicking the first suitable one")
+                                button_text = submit_button.text
+                                button_value = submit_button.get_attribute("value")
+                                logger.info(f"Selected button text: '{button_text}', value: '{button_value}'")
+                            elif not submit_button:
+                                raise TimeoutException("No suitable buttons found on page")
                         else:
                             raise TimeoutException("No buttons found on page")
                     except TimeoutException:
                         # Last resort: try pressing Enter in the TOTP field
-                        logger.warning("No buttons found, trying to submit by pressing Enter in TOTP field...")
+                        logger.warning("No suitable buttons found, trying to submit by pressing Enter in TOTP field...")
                         pin_field.send_keys(Keys.RETURN)
                         time.sleep(3)  # Wait for submission
                 
