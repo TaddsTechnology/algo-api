@@ -86,10 +86,35 @@ class LightweightKiteTokenManager:
                 'updated_at': datetime.now().isoformat()
             }
             
+            # Save to JSON cache file
             with open(self.token_file, 'w') as f:
                 json.dump(token_data, f)
             
-            logger.info("Token saved to file successfully")
+            logger.info("Token saved to cache file successfully")
+            
+            # ALSO update kite_config.py file
+            try:
+                config_path = os.path.join(os.path.dirname(__file__), '..', 'kite_config.py')
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config_content = f.read()
+                    
+                    # Update ACCESS_TOKEN line
+                    import re
+                    updated_content = re.sub(
+                        r'ACCESS_TOKEN = ".*"', 
+                        f'ACCESS_TOKEN = "{access_token}"', 
+                        config_content
+                    )
+                    
+                    with open(config_path, 'w') as f:
+                        f.write(updated_content)
+                    
+                    logger.info("Token also saved to kite_config.py successfully")
+                else:
+                    logger.warning("kite_config.py not found, only saving to cache file")
+            except Exception as config_error:
+                logger.error(f"Failed to update kite_config.py: {config_error}")
             
         except Exception as e:
             logger.error(f"Failed to save token to file: {e}")
@@ -158,7 +183,11 @@ class LightweightKiteTokenManager:
             
             # Auto install geckodriver with error handling
             try:
+                import geckodriver_autoinstaller
                 geckodriver_autoinstaller.install()
+            except ImportError:
+                logger.warning("geckodriver-autoinstaller not installed, using system geckodriver...")
+                # Continue anyway, assuming system geckodriver is available
             except PermissionError:
                 logger.warning("Permission denied for geckodriver installation, using system geckodriver...")
             except Exception as e:
