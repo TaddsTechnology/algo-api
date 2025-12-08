@@ -142,7 +142,7 @@ class LightweightKiteTokenManager:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
-            from webdriver_manager.firefox import GeckoDriverManager
+            import geckodriver_autoinstaller
             import time
             
             # Setup Firefox options
@@ -151,12 +151,12 @@ class LightweightKiteTokenManager:
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
             
+            # Auto install geckodriver
+            geckodriver_autoinstaller.install()
+            
             # Initialize Firefox driver
             logger.info("Initializing Firefox WebDriver...")
-            driver = webdriver.Firefox(
-                executable_path=GeckoDriverManager().install(),
-                options=firefox_options
-            )
+            driver = webdriver.Firefox(options=firefox_options)
             
             try:
                 # Step 1: Go to Kite login

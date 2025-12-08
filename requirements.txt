@@ -34,5 +34,4 @@ webdriver-manager>=4.0.0
 pyotp>=2.9.0
 
 # Firefox WebDriver for HF Spaces
-firefox>=0.0.1
 geckodriver-autoinstaller>=0.1.0
