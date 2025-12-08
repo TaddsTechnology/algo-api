@@ -131,26 +131,32 @@ class LightweightKiteTokenManager:
             logger.error(f"Token API test failed: {e}")
             return False
     
-    def _generate_new_token_automated(self) -> Optional[str]:
-        """Generate new token using automated browser"""
-        if not SELENIUM_AVAILABLE:
-            logger.error("Selenium not available for automated token generation")
-            return None
+    def _generate_token_automatically(self):
+        """Generate access token automatically using Selenium with Firefox"""
+        logger.info("Starting automated token generation...")
         
         try:
-            logger.info("Starting automated token generation...")
+            # Use Firefox instead of Chrome for better HF Space compatibility
+            from selenium import webdriver
+            from selenium.webdriver.firefox.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.firefox import GeckoDriverManager
+            import time
             
-            # Setup headless Chrome
-            chrome_options = Options()
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
+            # Setup Firefox options
+            firefox_options = Options()
+            firefox_options.add_argument("--headless")  # Run in background
+            firefox_options.add_argument("--no-sandbox")
+            firefox_options.add_argument("--disable-dev-shm-usage")
             
-            # Initialize driver with webdriver-manager
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Initialize Firefox driver
+            logger.info("Initializing Firefox WebDriver...")
+            driver = webdriver.Firefox(
+                executable_path=GeckoDriverManager().install(),
+                options=firefox_options
+            )
             
             try:
                 # Step 1: Go to Kite login
@@ -293,7 +299,7 @@ class LightweightKiteTokenManager:
         # Need to refresh
         logger.info("Token refresh required - generating new token...")
         
-        new_token = self._generate_new_token_automated()
+        new_token = self._generate_token_automatically()
         
         if new_token:
             logger.info("✅ Token refreshed automatically!")
