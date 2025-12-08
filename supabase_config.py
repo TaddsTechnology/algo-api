@@ -1,0 +1,3 @@
+# Supabase Configuration for Token Storage
+SUPABASE_URL = "https://zaaxqshypjhfbcxshods.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphYXhxc2h5cGpoZmJjeHNob2RzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQxNDIyNzcsImV4cCI6MjA2OTcxODI3N30.eAk3AO39IJRrVpPoaP3AKLXagCt7EmmkqppkHDxk5V4"

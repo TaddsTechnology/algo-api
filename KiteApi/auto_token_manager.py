@@ -32,20 +32,30 @@ except ImportError:
     SELENIUM_AVAILABLE = False
     print("⚠️ Selenium or webdriver-manager not installed. Run: pip install selenium webdriver-manager")
 
+# Try to import TOTP library
+try:
+    import pyotp
+    TOTP_AVAILABLE = True
+except ImportError:
+    TOTP_AVAILABLE = False
+    print("⚠️ pyotp not installed. Run: pip install pyotp")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AutoKiteTokenManager:
     """Fully automated Kite token manager with Supabase storage"""
     
-    def __init__(self, api_key: str, api_secret: str, user_id: str, password: str, pin: str,
-                 supabase_url: str, supabase_key: str, app_name: str = "kite_trading"):
+    def __init__(self, api_key: str, api_secret: str, user_id: str, password: str, 
+                 supabase_url: str, supabase_key: str, pin: str = None, totp_secret: str = None,
+                 app_name: str = "kite_trading"):
         
         self.api_key = api_key
         self.api_secret = api_secret
         self.user_id = user_id
         self.password = password
         self.pin = pin
+        self.totp_secret = totp_secret
         self.app_name = app_name
         
         # Supabase setup
@@ -195,7 +205,19 @@ class AutoKiteTokenManager:
                     EC.presence_of_element_located((By.ID, "pin"))
                 )
                 
-                driver.find_element(By.ID, "pin").send_keys(self.pin)
+                # Generate TOTP if secret is provided, otherwise use static PIN
+                if self.totp_secret and TOTP_AVAILABLE:
+                    totp = pyotp.TOTP(self.totp_secret)
+                    pin_value = totp.now()
+                    logger.info(f"Generated TOTP code: {pin_value}")
+                elif self.pin:
+                    pin_value = self.pin
+                    logger.info("Using static PIN")
+                else:
+                    logger.error("No PIN or TOTP secret provided")
+                    return None
+                
+                driver.find_element(By.ID, "pin").send_keys(pin_value)
                 driver.find_element(By.CLASS_NAME, "button-orange").click()
                 
                 # Step 4: Wait for redirect and extract request_token
@@ -389,9 +411,9 @@ def setup_automated_kite_manager():
     try:
         # Try environment-aware configs first
         try:
-            from kite_config_hf import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN
+            from kite_config_hf import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN, TOTP_SECRET
         except ImportError:
-            from kite_config import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN
+            from kite_config import API_KEY, API_SECRET, USER_ID, PASSWORD, PIN, TOTP_SECRET
         
         try:
             from supabase_config_hf import SUPABASE_URL, SUPABASE_KEY
@@ -403,7 +425,8 @@ def setup_automated_kite_manager():
             api_secret=API_SECRET, 
             user_id=USER_ID,
             password=PASSWORD,
-            pin=PIN,
+            pin=PIN if 'PIN' in locals() else None,
+            totp_secret=TOTP_SECRET if 'TOTP_SECRET' in locals() else None,
             supabase_url=SUPABASE_URL,
             supabase_key=SUPABASE_KEY
         )
