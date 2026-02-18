@@ -784,6 +784,15 @@ class LightweightKiteTokenManager:
             logger.error("❌ Automated token refresh failed")
             return None
 
+# Backward compatibility alias
+AutoKiteTokenManager = LightweightKiteTokenManager
+
+
+def setup_automated_kite_manager():
+    """Alias for setup_lightweight_kite_manager for backward compatibility"""
+    return setup_lightweight_kite_manager()
+
+
 def setup_lightweight_kite_manager():
     """Setup function to initialize lightweight token manager"""
     
