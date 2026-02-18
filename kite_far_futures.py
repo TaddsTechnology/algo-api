@@ -31,9 +31,9 @@ class KiteFarFutures:
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
-        print(f"🔑 Initialized Far Futures API with key: {api_key[:10]}...")
+        print(f"[KEY] Initialized Far Futures API with key: {api_key[:10]}...")
         if ws_manager:
-            print("🔌 WebSocket mode enabled - will use real-time tick data")
+            print("[WS] WebSocket mode enabled - will use real-time tick data")
     
     def clear_screen(self):
         """Clear terminal screen"""
@@ -59,15 +59,15 @@ class KiteFarFutures:
             if self.far_contracts:
                 return self.far_contracts
             
-            print(f"🔍 Fetching FAR futures contracts from exchange: {exchange}")
+            print(f"[SEARCH] Fetching FAR futures contracts from exchange: {exchange}")
             instruments_data = self._rate_limited_request(self.kite.instruments, exchange)
             
             if not instruments_data or 'data' not in instruments_data:
-                print("❌ No instruments data available")
+                print("[ERROR] No instruments data available")
                 return []
             
             instruments = instruments_data['data']
-            print(f"📊 Processing {len(instruments)} instruments for far futures...")
+            print(f"[DATA] Processing {len(instruments)} instruments for far futures...")
             
             current_date = datetime.now()
             far_contracts = []
@@ -101,8 +101,10 @@ class KiteFarFutures:
                             expiry_dt = datetime.strptime(expiry_str, '%Y-%m-%d')
                             days_diff = (expiry_dt - current_date).days
                             
-                            # Only far month futures (71-105 days)
-                            if 71 <= days_diff <= 105:
+                            # Only far month futures (55-130 days)
+                            # Using wider range to catch the actual 3rd month expiry
+                            # which varies based on current date and contract cycle
+                            if 55 <= days_diff <= 130:
                                 contract = {
                                     'symbol': trading_symbol,
                                     'name': name,
@@ -129,13 +131,19 @@ class KiteFarFutures:
             # Sort by popularity first, then by symbol
             far_contracts.sort(key=lambda x: (not x['is_popular'], x['symbol']))
             
-            print(f"✅ Found {len(far_contracts)} far futures contracts")
+            print(f"[OK] Found {len(far_contracts)} far futures contracts")
+            
+            # Debug: Show sample expiries found
+            if far_contracts:
+                print(f"   Sample far contracts:")
+                for i, c in enumerate(far_contracts[:5]):
+                    print(f"     {c['symbol']}: {c['expiry']} ({c['days_to_expiry']} days)")
             
             self.far_contracts = far_contracts
             return far_contracts
             
         except Exception as e:
-            print(f"❌ Error fetching far futures contracts: {e}")
+            print(f"[ERROR] Error fetching far futures contracts: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -158,7 +166,7 @@ class KiteFarFutures:
     def fetch_live_data_from_websocket(self):
         """Get live data from WebSocket manager (real-time ticks)"""
         if not self.ws_manager:
-            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            print("[WARN] WebSocket manager not available - use HTTP fallback")
             return self.fetch_live_data_http()
         
         try:
@@ -201,7 +209,7 @@ class KiteFarFutures:
             return live_data
             
         except Exception as e:
-            print(f"❌ Error getting WebSocket data: {e}")
+            print(f"[ERROR] Error getting WebSocket data: {e}")
             return {}
     
     def fetch_live_data_http(self, use_ltp_only=True, limit_contracts=None):
@@ -213,10 +221,10 @@ class KiteFarFutures:
                 contracts = contracts[:limit_contracts]
             
             if not contracts:
-                print("❌ No far futures contracts available")
+                print("[ERROR] No far futures contracts available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(contracts)} far futures via HTTP...")
+            print(f"[LIVE] Fetching live data for {len(contracts)} far futures via HTTP...")
             
             symbols = []
             symbol_to_contract = {}
@@ -270,17 +278,17 @@ class KiteFarFutures:
                                     }
                 
                 except Exception as e:
-                    print(f"⚠️ Error fetching batch {i//batch_size + 1}: {e}")
+                    print(f"[WARN] Error fetching batch {i//batch_size + 1}: {e}")
                     continue
             
             with self.data_lock:
                 self.live_data = live_data
             
-            print(f"✅ Successfully fetched data for {len(live_data)} far futures")
+            print(f"[OK] Successfully fetched data for {len(live_data)} far futures")
             return live_data
             
         except Exception as e:
-            print(f"❌ Error fetching live data: {e}")
+            print(f"[ERROR] Error fetching live data: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -300,13 +308,13 @@ class KiteFarFutures:
     def display_live_data(self, limit=20):
         """Display live data in terminal"""
         if not self.live_data:
-            print("❌ No live data available")
+            print("[ERROR] No live data available")
             return
         
         self.clear_screen()
         print("=" * 120)
-        print(f"🔮 FAR FUTURES LIVE DATA - {datetime.now().strftime('%H:%M:%S')}")
-        print(f"📊 Market Status: {'🟢 OPEN' if self.is_market_open() else '🔴 CLOSED'}")
+        print(f"[FAR] FAR FUTURES LIVE DATA - {datetime.now().strftime('%H:%M:%S')}")
+        print(f"[DATA] Market Status: {'[OPEN] OPEN' if self.is_market_open() else '[CLOSED] CLOSED'}")
         print("=" * 120)
         
         # Header with all fields
@@ -320,7 +328,7 @@ class KiteFarFutures:
             change_pct = data.get('change_pct', 0)
             
             # Color coding for change
-            change_color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+            change_color = "[OPEN]" if change > 0 else "[CLOSED]" if change < 0 else "⚪"
             
             print(f"{symbol:<20} {data.get('ltp', 0):<10.2f} "
                   f"{change_color} {change:<8.2f} "
@@ -334,17 +342,30 @@ class KiteFarFutures:
             count += 1
         
         print("-" * 120)
-        print(f"📈 Showing {count} of {len(self.live_data)} far futures contracts")
+        print(f"[LIVE] Showing {count} of {len(self.live_data)} far futures contracts")
         print("=" * 120)
 
 def main():
     """Main function to run far futures fetcher"""
     try:
         # Load configuration
+        api_key = None
+        access_token = None
+        
+        # Try kite_config_hf.py first
         config_file = "kite_config_hf.py"
         if os.path.exists(config_file):
             import importlib.util
             spec = importlib.util.spec_from_file_location("config", config_file)
+            config = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(config)
+            
+            api_key = config.API_KEY
+            access_token = config.ACCESS_TOKEN
+        # Try kite_config.py as second option
+        elif os.path.exists("kite_config.py"):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("config", "kite_config.py")
             config = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(config)
             
@@ -356,13 +377,13 @@ def main():
             access_token = os.getenv('KITE_ACCESS_TOKEN')
         
         if not api_key or not access_token:
-            print("❌ Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
+            print("ERROR: Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
             return
         
         # Initialize far futures fetcher
         far_futures = KiteFarFutures(api_key, access_token)
         
-        print("🚀 Starting Far Futures Live Data Feed...")
+        print("Starting Far Futures Live Data Feed...")
         print("Press Ctrl+C to stop")
         
         while True:
@@ -372,19 +393,19 @@ def main():
                 far_futures.display_live_data(limit=None)
                 
                 fetch_time = time.time() - start_time
-                print(f"⏱️ Fetch time: {fetch_time:.2f} seconds")
+                print(f"Fetch time: {fetch_time:.2f} seconds")
                 
                 time.sleep(2)  # Refresh every 2 seconds
                 
             except KeyboardInterrupt:
-                print("\n👋 Stopping far futures feed...")
+                print("\nStopping far futures feed...")
                 break
             except Exception as e:
-                print(f"❌ Error in main loop: {e}")
+                print(f"ERROR in main loop: {e}")
                 time.sleep(5)
     
     except Exception as e:
-        print(f"❌ Failed to start far futures fetcher: {e}")
+        print(f"ERROR: Failed to start far futures fetcher: {e}")
         import traceback
         traceback.print_exc()
 
