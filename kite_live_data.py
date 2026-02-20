@@ -101,16 +101,21 @@ class KiteLiveData:
             
             print(f"✅ Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
             
-            # Special mapping for indices (NSE symbols may differ from underlying)
-            # Try multiple variations to find the right instrument token
+            # Debug: Print index symbols found in NSE
+            index_keys = [k for k in symbol_to_token.keys() if any(x in k for x in ['NIFTY', 'BANK', 'FIN', 'SENSEX', 'MID', 'NEXT'])]
+            print(f"DEBUG: Index symbols in NSE: {index_keys}")
+            
+            # Special mapping for indices (NSE symbols differ from NFO underlying)
+            # NFO uses: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50
+            # NSE uses: NIFTY 50, NIFTY BANK, NIFTY FIN SERVICE, NIFTY MID SELECT, NIFTY NEXT 50
             index_symbol_map = {
-                'NIFTY': ['NIFTY 50', 'NSE:NIFTY 50'],
-                'BANKNIFTY': ['BANKNIFTY', 'NSE:BANKNIFTY'],
-                'FINNIFTY': ['FINNIFTY', 'NSE:FINNIFTY'],
-                'MIDCPNIFTY': ['MIDCPNIFTY', 'NSE:MIDCPNIFTY'],
-                'NIFTYNXT50': ['NIFTYNXT50', 'NSE:NIFTYNXT50'],
-                'SENSEX': ['SENSEX', 'NSE:SENSEX'],
-                'BANKEX': ['BANKEX', 'NSE:BANKEX']
+                'NIFTY': ['NIFTY 50'],
+                'BANKNIFTY': ['NIFTY BANK'],
+                'FINNIFTY': ['NIFTY FIN SERVICE'],
+                'MIDCPNIFTY': ['NIFTY MID SELECT'],
+                'NIFTYNXT50': ['NIFTY NEXT 50'],
+                'SENSEX': ['SENSEX'],
+                'BANKEX': ['BANKEX']
             }
             
             # Build instrument list with metadata (both equity and indices)
