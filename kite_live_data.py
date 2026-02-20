@@ -80,11 +80,11 @@ class KiteLiveData:
             
             print(f"📊 Found {len(underlying_symbols)} unique underlying symbols with futures")
             
-            # Now fetch NSE spot instruments to get instrument tokens
-            print("🔍 Fetching NSE spot instruments for instrument tokens...")
+            # Now fetch NSE instruments (both equity and indices)
+            print("🔍 Fetching NSE instruments for instrument tokens...")
             nse_instruments_data = self.kite.instruments('NSE')
             
-            # Map symbol to instrument token
+            # Map symbol to instrument token (both EQ and INDEX)
             symbol_to_token = {}
             if nse_instruments_data and 'data' in nse_instruments_data:
                 for instrument in nse_instruments_data['data']:
@@ -93,26 +93,31 @@ class KiteLiveData:
                         instrument_type = instrument.get('instrument_type', '').upper()
                         instrument_token = instrument.get('instrument_token')
                         
-                        # Only equity instruments
-                        if instrument_type == 'EQ' and symbol and instrument_token:
+                        # Include equity (EQ) and indices (INDEX)
+                        if instrument_type in ['EQ', 'INDEX'] and symbol and instrument_token:
                             symbol_to_token[symbol] = instrument_token
                     except Exception:
                         continue
             
-            print(f"✅ Mapped {len(symbol_to_token)} NSE equity instrument tokens")
+            print(f"✅ Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
             
-            # Build instrument list with metadata
+            # Build instrument list with metadata (both equity and indices)
             equity_instruments = []
             for symbol in underlying_symbols.keys():
                 is_popular = any(pop_symbol in symbol for pop_symbol in popular_symbols)
                 instrument_token = symbol_to_token.get(symbol)
                 
+                # Determine instrument type
+                inst_type = 'EQ'
+                if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50', 'SENSEX', 'BANKEX']:
+                    inst_type = 'INDEX'
+                
                 equity_instruments.append({
                     'symbol': symbol,
                     'name': symbol,
-                    'exchange': 'NSE',  # Spot prices are on NSE
-                    'instrument_type': 'EQ',
-                    'instrument_token': instrument_token,  # Add instrument token for WebSocket
+                    'exchange': 'NSE',
+                    'instrument_type': inst_type,
+                    'instrument_token': instrument_token,
                     'is_popular': is_popular
                 })
             
