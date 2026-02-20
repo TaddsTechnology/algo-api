@@ -101,15 +101,16 @@ class KiteLiveData:
             
             print(f"✅ Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
             
-            # Special mapping for indices (NSE symbols are different from underlying)
+            # Special mapping for indices (NSE symbols may differ from underlying)
+            # Try multiple variations to find the right instrument token
             index_symbol_map = {
-                'NIFTY': 'NIFTY 50',
-                'BANKNIFTY': 'BANKNIFTY',
-                'FINNIFTY': 'FINNIFTY',
-                'MIDCPNIFTY': 'MIDCPNIFTY',
-                'NIFTYNXT50': 'NIFTYNXT50',
-                'SENSEX': 'SENSEX',
-                'BANKEX': 'BANKEX'
+                'NIFTY': ['NIFTY 50', 'NSE:NIFTY 50'],
+                'BANKNIFTY': ['BANKNIFTY', 'NSE:BANKNIFTY'],
+                'FINNIFTY': ['FINNIFTY', 'NSE:FINNIFTY'],
+                'MIDCPNIFTY': ['MIDCPNIFTY', 'NSE:MIDCPNIFTY'],
+                'NIFTYNXT50': ['NIFTYNXT50', 'NSE:NIFTYNXT50'],
+                'SENSEX': ['SENSEX', 'NSE:SENSEX'],
+                'BANKEX': ['BANKEX', 'NSE:BANKEX']
             }
             
             # Build instrument list with metadata (both equity and indices)
@@ -117,10 +118,13 @@ class KiteLiveData:
             for symbol in underlying_symbols.keys():
                 is_popular = any(pop_symbol in symbol for pop_symbol in popular_symbols)
                 
-                # For indices, try both the symbol and mapped symbol
+                # For indices, try multiple symbol variations
                 instrument_token = symbol_to_token.get(symbol)
                 if not instrument_token and symbol in index_symbol_map:
-                    instrument_token = symbol_to_token.get(index_symbol_map[symbol])
+                    for possible_symbol in index_symbol_map[symbol]:
+                        instrument_token = symbol_to_token.get(possible_symbol)
+                        if instrument_token:
+                            break
                 
                 # Determine instrument type
                 inst_type = 'EQ'
