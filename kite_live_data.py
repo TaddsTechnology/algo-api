@@ -101,11 +101,26 @@ class KiteLiveData:
             
             print(f"✅ Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
             
+            # Special mapping for indices (NSE symbols are different from underlying)
+            index_symbol_map = {
+                'NIFTY': 'NIFTY 50',
+                'BANKNIFTY': 'BANKNIFTY',
+                'FINNIFTY': 'FINNIFTY',
+                'MIDCPNIFTY': 'MIDCPNIFTY',
+                'NIFTYNXT50': 'NIFTYNXT50',
+                'SENSEX': 'SENSEX',
+                'BANKEX': 'BANKEX'
+            }
+            
             # Build instrument list with metadata (both equity and indices)
             equity_instruments = []
             for symbol in underlying_symbols.keys():
                 is_popular = any(pop_symbol in symbol for pop_symbol in popular_symbols)
+                
+                # For indices, try both the symbol and mapped symbol
                 instrument_token = symbol_to_token.get(symbol)
+                if not instrument_token and symbol in index_symbol_map:
+                    instrument_token = symbol_to_token.get(index_symbol_map[symbol])
                 
                 # Determine instrument type
                 inst_type = 'EQ'
