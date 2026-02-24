@@ -285,14 +285,33 @@ async def update_cache_from_websocket():
                 symbol = token_to_symbol.get(token, f"TOKEN_{token}")
                 
                 # Format tick data
+                futures_bid = tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0
+                futures_ask = tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0
+                
+                # Calculate profit: spot_ask - futures_bid
+                # Get underlying symbol name from contract_info
+                profit = None
+                if contract_info and 'data' in contract_info:
+                    underlying_name = contract_info['data'].get('name', '')
+                    if underlying_name:
+                        # Remove quotes from name
+                        underlying_name = underlying_name.replace('"', '').strip()
+                        # Look up spot data
+                        spot_data = cache.current_data.get(underlying_name)
+                        if spot_data:
+                            spot_ask = spot_data.get('ask', 0)
+                            if spot_ask and futures_bid:
+                                profit = round(spot_ask - futures_bid, 2)
+                
                 formatted_tick = {
                     'symbol': symbol,
                     'ltp': tick.get('last_price', 0),
                     'volume': tick.get('volume_traded', 0),
                     'change': tick.get('change', 0),
                     'ohlc': tick.get('ohlc', {}),
-                    'bid': tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0,
-                    'ask': tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0,
+                    'bid': futures_bid,
+                    'ask': futures_ask,
+                    'profit': profit,
                     'timestamp': tick.get('updated_at'),
                     'contract_info': contract_info['data']
                 }
