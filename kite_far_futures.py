@@ -101,9 +101,9 @@ class KiteFarFutures:
                             expiry_dt = datetime.strptime(expiry_str, '%Y-%m-%d')
                             days_diff = (expiry_dt - current_date).days
                             
-                            # Only far month futures (60-180 days)
-                            # Adjusted to avoid overlap with next (30-65)
-                            if 60 <= days_diff <= 180:
+                            # Far month futures (75-120 days)
+                            # Captures the third nearest contract
+                            if 75 <= days_diff <= 120:
                                 contract = {
                                     'symbol': trading_symbol,
                                     'name': name,

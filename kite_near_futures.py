@@ -101,9 +101,9 @@ class KiteNearFutures:
                             expiry_dt = datetime.strptime(expiry_str, '%Y-%m-%d')
                             days_diff = (expiry_dt - current_date).days
                             
-                            # Only next month futures (30-65 days)
-                            # Adjusted to catch actual next month expiry (March)
-                            if 30 <= days_diff <= 65:
+                            # Next month futures (40-75 days)
+                            # Captures the second nearest contract
+                            if 40 <= days_diff <= 75:
                                 contract = {
                                     'symbol': trading_symbol,
                                     'name': name,

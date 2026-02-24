@@ -421,10 +421,10 @@ async def get_live_data():
 
 @app.get("/api/near-futures")
 async def get_near_futures():
-    """Get near futures (current month: 0-35 days expiry)"""
+    """Get near futures (nearest expiry: 0-40 days)"""
     return {
         "category": "near",
-        "description": "Current month futures (0-35 days)",
+        "description": "Near futures (0-40 days)",
         "data": cache.near_data,
         "timestamp": cache.last_update,
         "count": len(cache.near_data)
@@ -432,10 +432,10 @@ async def get_near_futures():
 
 @app.get("/api/next-futures")
 async def get_next_futures():
-    """Get next futures (next month: 36-70 days expiry)"""
+    """Get next futures (second nearest: 40-75 days)"""
     return {
         "category": "next",
-        "description": "Next month futures (36-70 days)",
+        "description": "Next futures (40-75 days)",
         "data": cache.next_data,
         "timestamp": cache.last_update,
         "count": len(cache.next_data)
@@ -443,10 +443,10 @@ async def get_next_futures():
 
 @app.get("/api/far-futures")
 async def get_far_futures():
-    """Get far futures (far month: 71-105 days expiry)"""
+    """Get far futures (third nearest: 75-120 days)"""
     return {
         "category": "far",
-        "description": "Far month futures (71-105 days)",
+        "description": "Far futures (75-120 days)",
         "data": cache.far_data,
         "timestamp": cache.last_update,
         "count": len(cache.far_data)
