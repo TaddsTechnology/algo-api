@@ -83,24 +83,24 @@ class FuturesAggregator:
                         expiry_dt = datetime.strptime(expiry_str, '%Y-%m-%d')
                         days_diff = (expiry_dt - current_date).days
                         
-                        # Only include future contracts
-                        if days_diff > 0:
-                            is_popular = any(pop in name for pop in popular_symbols)
-                            
-                            contract = {
-                                'symbol': trading_symbol,
-                                'name': name,
-                                'instrument_token': instrument_token,
-                                'expiry': expiry_str,
-                                'expiry_formatted': expiry_dt.strftime('%d/%m/%Y'),
-                                'days_to_expiry': days_diff,
-                                'lot_size': int(lot_size) if lot_size else 1,
-                                'instrument_type': instrument_type,
-                                'tick_size': float(instrument.get('tick_size', 0.05)),
-                                'exchange': exchange,
-                                'is_popular': is_popular
-                            }
-                            all_contracts.append(contract)
+                        # Include all contracts (even if expired today)
+                        # This ensures 24 Feb is included until market closes
+                        is_popular = any(pop in name for pop in popular_symbols)
+                        
+                        contract = {
+                            'symbol': trading_symbol,
+                            'name': name,
+                            'instrument_token': instrument_token,
+                            'expiry': expiry_str,
+                            'expiry_formatted': expiry_dt.strftime('%d/%m/%Y'),
+                            'days_to_expiry': days_diff,
+                            'lot_size': int(lot_size) if lot_size else 1,
+                            'instrument_type': instrument_type,
+                            'tick_size': float(instrument.get('tick_size', 0.05)),
+                            'exchange': exchange,
+                            'is_popular': is_popular
+                        }
+                        all_contracts.append(contract)
                     except:
                         continue
             except:
