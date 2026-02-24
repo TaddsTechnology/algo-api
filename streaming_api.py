@@ -288,10 +288,9 @@ async def update_cache_from_websocket():
                 futures_bid = tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0
                 futures_ask = tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0
                 
-                # Calculate profit: spot_ask - futures_bid
-                # Get underlying symbol name from contract_info
+                # Calculate profit: spot_ask - futures_bid (only for futures, not for live-data)
                 profit = None
-                if contract_info and 'data' in contract_info:
+                if category != 'current' and contract_info and 'data' in contract_info:
                     underlying_name = contract_info['data'].get('name', '')
                     if underlying_name:
                         # Remove quotes from name
@@ -303,6 +302,7 @@ async def update_cache_from_websocket():
                             if spot_ask and futures_bid:
                                 profit = round(spot_ask - futures_bid, 2)
                 
+                # Build tick data - profit only for futures (near/next/far)
                 formatted_tick = {
                     'symbol': symbol,
                     'ltp': tick.get('last_price', 0),
@@ -311,10 +311,13 @@ async def update_cache_from_websocket():
                     'ohlc': tick.get('ohlc', {}),
                     'bid': futures_bid,
                     'ask': futures_ask,
-                    'profit': profit,
                     'timestamp': tick.get('updated_at'),
                     'contract_info': contract_info['data']
                 }
+                
+                # Add profit only for futures (near/next/far), not for live-data
+                if category != 'current':
+                    formatted_tick['profit'] = profit
                 
                 # Assign to category
                 if category == 'current':
