@@ -59,13 +59,14 @@ from datetime import datetime
 from kite_current_futures import KiteCurrentFutures
 from kite_near_futures import KiteNearFutures
 from kite_far_futures import KiteFarFutures
+from kite_futures_aggregator import FuturesAggregator
 from kite_live_data import KiteLiveData
 from kite_websocket_manager import KiteWebSocketManager
 
 app = FastAPI(
     title="Real-Time Futures Streaming API",
-    description="High-performance streaming API for live futures market data",
-    version="3.0.0"
+    description="Dynamic rank-based futures API for arbitrage trading",
+    version="4.0.0"
 )
 
 # Add CORS middleware
@@ -140,6 +141,7 @@ live_data_fetcher = None  # Live spot prices
 near_futures = None       # Current month futures (was "current")
 next_futures = None       # Next month futures (was "near")
 far_futures = None        # Far month futures
+futures_aggregator = None  # NEW: Dynamic rank-based futures aggregator
 ws_manager = None         # WebSocket manager for real-time data
 
 # Instrument token mappings
@@ -154,18 +156,23 @@ try:
         
         # Initialize contract fetchers WITH WebSocket manager for real-time data
         live_data_fetcher = KiteLiveData(api_key, access_token, ws_manager)      # Live spot data
+        
+        # Initialize NEW aggregator for dynamic rank-based futures (near/next/far)
+        futures_aggregator = FuturesAggregator(api_key, access_token)
+        
+        # Also keep old fetchers for backward compatibility
         near_futures = KiteCurrentFutures(api_key, access_token, ws_manager)     # 0-35 days
         next_futures = KiteNearFutures(api_key, access_token, ws_manager)        # 36-70 days
         far_futures = KiteFarFutures(api_key, access_token, ws_manager)          # 71-105 days
         
-        print("✅ API fetchers initialized successfully")
-        print("🔌 WebSocket mode enabled for real-time data")
-        print("⚡ All fetchers configured to use WebSocket for live ticks")
+        print("OK: API fetchers initialized successfully")
+        print("OK: Futures Aggregator (dynamic rank-based) enabled")
+        print("OK: WebSocket mode enabled for real-time data")
     else:
-        print("⚠️ Missing API credentials - will return empty data")
+        print("WARNING: Missing API credentials - will return empty data")
 except Exception as e:
-    print(f"❌ Error initializing fetchers: {e}")
-    print("⚠️ API will start but data fetching may fail")
+    print(f"ERROR: Error initializing fetchers: {e}")
+    print("WARNING: API will start but data fetching may fail")
 
 # Background task to setup WebSocket subscriptions
 async def setup_websocket_subscriptions():
@@ -173,18 +180,28 @@ async def setup_websocket_subscriptions():
     global token_to_contract, token_to_symbol
     
     # Check if fetchers are initialized
-    if not ws_manager or not live_data_fetcher or not near_futures or not next_futures or not far_futures:
-        print("❌ Fetchers not initialized - skipping WebSocket setup")
+    if not ws_manager or not live_data_fetcher:
+        print("ERROR: Fetchers not initialized - skipping WebSocket setup")
         return
     
     try:
-        print("🔍 Fetching all instrument metadata...")
+        print("[SETUP] Fetching all instrument metadata...")
         
-        # Get all contracts (metadata only - no price data needed)
+        # Get live instruments
         live_instruments = await asyncio.to_thread(live_data_fetcher.get_equity_instruments)
-        near_contracts = await asyncio.to_thread(near_futures.get_current_futures_contracts)
-        next_contracts = await asyncio.to_thread(next_futures.get_near_futures_contracts)
-        far_contracts = await asyncio.to_thread(far_futures.get_far_futures_contracts)
+        
+        # Get futures from aggregator (dynamic rank-based)
+        if futures_aggregator:
+            agg_result = await asyncio.to_thread(futures_aggregator.fetch_all_futures_contracts)
+            near_contracts = agg_result.get('near', [])
+            next_contracts = agg_result.get('next', [])
+            far_contracts = agg_result.get('far', [])
+            print(f"[SETUP] Aggregator - Near: {len(near_contracts)}, Next: {len(next_contracts)}, Far: {len(far_contracts)}")
+        else:
+            # Fallback to old fetchers
+            near_contracts = await asyncio.to_thread(near_futures.get_current_futures_contracts)
+            next_contracts = await asyncio.to_thread(next_futures.get_near_futures_contracts)
+            far_contracts = await asyncio.to_thread(far_futures.get_far_futures_contracts)
         
         # Collect all instrument tokens to subscribe
         all_tokens = []
@@ -221,7 +238,7 @@ async def setup_websocket_subscriptions():
                 token_to_symbol[int(token)] = contract.get('symbol')
                 token_to_contract[int(token)] = {'category': 'far', 'data': contract}
         
-        print(f"📊 Collected {len(all_tokens)} instrument tokens")
+        print(f"[SETUP] Collected {len(all_tokens)} instrument tokens")
         print(f"   - Live: {len(live_instruments)}")
         print(f"   - Near: {len(near_contracts)}")
         print(f"   - Next: {len(next_contracts)}")
@@ -503,13 +520,14 @@ async def root():
     """Root endpoint with API info"""
     return {
         "api": "Real-Time Futures Streaming API",
-        "version": "3.0.0",
+        "version": "4.0.0",
+        "description": "Dynamic rank-based futures with spot-futures arbitrage support",
         "endpoints": {
             "all_futures": "/api/all-futures-combined",
             "current": "/api/live-data (Live spot prices)",
-            "near": "/api/near-futures (0-35 days)",
-            "next": "/api/next-futures (36-70 days)",
-            "far": "/api/far-futures (71-105 days)",
+            "near": "/api/near-futures (1st nearest expiry)",
+            "next": "/api/next-futures (2nd nearest expiry)",
+            "far": "/api/far-futures (3rd nearest expiry)",
             "stream": "/api/stream (SSE)",
             "health": "/api/health"
         },
