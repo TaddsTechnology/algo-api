@@ -101,9 +101,9 @@ class KiteCurrentFutures:
                             expiry_dt = datetime.strptime(expiry_str, '%Y-%m-%d')
                             days_diff = (expiry_dt - current_date).days
                             
-                            # Current/Near month futures (0-40 days)
-                            # Captures whichever contract is nearest
-                            if 0 <= days_diff <= 40:
+                            # Current month futures (0-45 days)
+                            # Captures the nearest contract
+                            if 0 <= days_diff < 46:
                                 contract = {
                                     'symbol': trading_symbol,
                                     'name': name,

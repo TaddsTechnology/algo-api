@@ -103,7 +103,7 @@ class KiteFarFutures:
                             
                             # Far month futures (75-120 days)
                             # Captures the third nearest contract
-                            if 75 <= days_diff <= 120:
+                            if 76 <= days_diff <= 120:
                                 contract = {
                                     'symbol': trading_symbol,
                                     'name': name,
