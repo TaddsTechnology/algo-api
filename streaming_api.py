@@ -288,7 +288,8 @@ async def update_cache_from_websocket():
                 futures_bid = tick.get('depth', {}).get('buy', [{}])[0].get('price', 0) if tick.get('depth') else 0
                 futures_ask = tick.get('depth', {}).get('sell', [{}])[0].get('price', 0) if tick.get('depth') else 0
                 
-                # Calculate profit: spot_ask - futures_bid (only for futures, not for live-data)
+                # Calculate profit %: (futures_bid - spot_ask) / spot_ask * 100
+                # Only for futures (near/next/far), not for live-data
                 profit = None
                 if category != 'current' and contract_info and 'data' in contract_info:
                     underlying_name = contract_info['data'].get('name', '')
@@ -300,7 +301,8 @@ async def update_cache_from_websocket():
                         if spot_data:
                             spot_ask = spot_data.get('ask', 0)
                             if spot_ask and futures_bid:
-                                profit = round(spot_ask - futures_bid, 2)
+                                # Profit % = (futures_bid - spot_ask) / spot_ask * 100
+                                profit = round(((futures_bid - spot_ask) / spot_ask) * 100, 2)
                 
                 # Build tick data - profit only for futures (near/next/far)
                 formatted_tick = {
