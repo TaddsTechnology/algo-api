@@ -11,4 +11,4 @@ TOTP_SECRET = "SV4FAGXVEHDZ6X4KO4JA3P2JL6SCSDIU"
 # PIN = "your_static_pin_here"
 
 # This will be populated automatically
-ACCESS_TOKEN = "6056OR3h2hxc97S47KujJZ3EvacJiI0B"
+ACCESS_TOKEN = "GkLdSrl7I0o7DVx7FuBaItwGYw0He3n0"
