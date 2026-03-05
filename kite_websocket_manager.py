@@ -16,15 +16,19 @@ logger = logging.getLogger(__name__)
 class KiteWebSocketManager:
     """Manages WebSocket connection for real-time tick data"""
     
-    def __init__(self, api_key, access_token, max_reconnect_attempts=3):
+    def __init__(self, api_key, access_token, max_reconnect_attempts=10, enable_websocket=True):
         self.api_key = api_key
         self.access_token = access_token
         self.kws = None
         
-        # Reconnection settings
+        # WebSocket enable/disable - set to False if connection fails repeatedly
+        self.enable_websocket = enable_websocket
+        
+        # Reconnection settings - increased for better reliability
         self.max_reconnect_attempts = max_reconnect_attempts
         self.reconnect_count = 0
         self._stop_reconnecting = False
+        self._reconnect_delay = 5  # Start with 5 seconds
         
         # Data cache - thread-safe
         self.tick_data = {}
@@ -33,11 +37,22 @@ class KiteWebSocketManager:
         # Connection state
         self.is_connected = False
         self.subscribed_tokens = set()
+        self._last_connection_error = None
         
         logger.info(f"🔑 Initialized WebSocket Manager with key: {api_key[:10]}...")
     
     def start(self):
         """Start WebSocket connection"""
+        # Check if WebSocket is disabled
+        if not self.enable_websocket:
+            logger.warning("WebSocket is disabled. Use HTTP fallback for data.")
+            return
+        
+        # Log credentials being used
+        logger.info(f"🔐 Starting WebSocket with API_KEY: {self.api_key[:8] if self.api_key else 'NONE'}...")
+        logger.info(f"🔐 Access token present: {bool(self.access_token)}")
+        logger.info(f"🔐 Access token preview: {self.access_token[:10] if self.access_token else 'NONE'}...")
+            
         try:
             # Initialize KiteTicker
             self.kws = KiteTicker(self.api_key, self.access_token)
@@ -52,13 +67,16 @@ class KiteWebSocketManager:
             
             # Start connection in separate thread
             # Use threaded=True to run in background without signal handlers
+            logger.info("⏳ Attempting WebSocket connection (this may take up to 30 seconds)...")
             ws_thread = threading.Thread(target=lambda: self.kws.connect(threaded=True), daemon=True)
             ws_thread.start()
             
-            logger.info("🚀 WebSocket connection initiated...")
+            logger.info("🚀 WebSocket thread started, waiting for connection...")
             
         except Exception as e:
             logger.error(f"❌ Error starting WebSocket: {e}")
+            import traceback
+            traceback.print_exc()
             raise
     
     def on_connect(self, ws, response):
@@ -112,11 +130,42 @@ class KiteWebSocketManager:
     
     def on_error(self, ws, code, reason):
         """Callback on WebSocket error"""
+        self._last_connection_error = f"{code} - {reason}"
         logger.error(f"❌ WebSocket error: {code} - {reason}")
+    
+    def get_last_error(self):
+        """Get the last connection error"""
+        return self._last_connection_error
+    
+    def is_websocket_available(self):
+        """Check if WebSocket is available (connected or can reconnect)"""
+        return self.is_connected and not self._stop_reconnecting
+    
+    def retry_connection(self):
+        """Manually retry WebSocket connection"""
+        if self._stop_reconnecting:
+            logger.info("♻️ Resetting reconnection state for manual retry...")
+            self._stop_reconnecting = False
+            self.reconnect_count = 0
+        
+        if self.is_connected:
+            logger.info("ℹ️ WebSocket already connected")
+            return
+        
+        logger.info("🔄 Manual connection retry initiated...")
+        self.start()
     
     def on_reconnect(self, ws, attempts_count):
         """Callback on reconnection attempt"""
         logger.info(f"🔄 Reconnecting... (Attempt {attempts_count})")
+        
+        # Stop reconnection if max attempts reached
+        if attempts_count >= self.max_reconnect_attempts:
+            logger.error(f"STOPPING: Max reconnection attempts ({self.max_reconnect_attempts}) reached")
+            self._stop_reconnecting = True
+            if self.kws:
+                self.kws.close()
+            self.is_connected = False
     
     def on_noreconnect(self, ws):
         """Callback when max reconnection attempts reached"""
