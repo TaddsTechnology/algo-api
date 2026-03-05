@@ -7,40 +7,86 @@ Uses Server-Sent Events (SSE) for continuous data streaming
 import os
 import sys
 
+def _validate_token_via_api(api_key, access_token):
+    """Validate access token by calling Kite profile API"""
+    try:
+        import requests
+        headers = {
+            'Authorization': f'token {api_key}:{access_token}',
+            'Content-Type': 'application/json'
+        }
+        response = requests.get(
+            'https://api.kite.trade/user/profile',
+            headers=headers,
+            timeout=10
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def _try_auto_refresh_token():
+    """Attempt to auto-generate a new access token via HTTP login (no Selenium)"""
+    try:
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        from refresh_token import refresh_access_token
+        new_token = refresh_access_token()
+        if new_token:
+            os.environ['KITE_ACCESS_TOKEN'] = new_token
+            print("[OK] Auto token refresh successful (HTTP-based)")
+            return new_token
+        else:
+            print("[ERROR] HTTP-based token refresh returned no token")
+    except Exception as e:
+        print(f"[ERROR] Auto token refresh failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # Fallback: try old Selenium-based manager
+    try:
+        kiteapi_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'KiteApi')
+        if kiteapi_path not in sys.path:
+            sys.path.insert(0, kiteapi_path)
+        
+        from auto_token_manager import setup_lightweight_kite_manager
+        manager = setup_lightweight_kite_manager()
+        if manager:
+            token = manager.get_valid_token()
+            if token:
+                os.environ['KITE_ACCESS_TOKEN'] = token
+                print("[OK] Auto token refresh successful (Selenium fallback)")
+                return token
+    except Exception as e2:
+        print(f"[ERROR] Selenium fallback also failed: {e2}")
+    
+    return None
+
+
 def initialize_kite_credentials():
-    """Initialize Kite credentials if missing"""
-    if not os.environ.get('KITE_ACCESS_TOKEN') or os.environ.get('KITE_ACCESS_TOKEN') == "":
-        try:
-            print("⚠️ KITE_ACCESS_TOKEN missing, triggering auto-generation...")
-            # Add project root to path
-            project_root = os.path.dirname(os.path.abspath(__file__))
-            kiteapi_path = os.path.join(project_root, 'KiteApi')
-            
-            # Add paths to sys.path
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
-            if kiteapi_path not in sys.path:
-                sys.path.insert(0, kiteapi_path)
-            
-            # Run auto token generation
-            from auto_token_manager import setup_lightweight_kite_manager
-            
-            manager = setup_lightweight_kite_manager()
-            if manager:
-                token = manager.get_valid_token()
-                if token:
-                    # Set environment variable for current session
-                    os.environ['KITE_ACCESS_TOKEN'] = token
-                    print("✅ Auto token generation successful")
-                    return True
-                else:
-                    print("❌ Auto token generation failed")
-            else:
-                print("❌ Failed to setup token manager")
-        except Exception as e:
-            print(f"❌ Auto initialization failed: {e}")
-            import traceback
-            traceback.print_exc()
+    """Initialize and validate Kite credentials, auto-refresh if expired"""
+    api_key = os.environ.get('KITE_API_KEY', '')
+    access_token = os.environ.get('KITE_ACCESS_TOKEN', '')
+    
+    # Case 1: Token is missing entirely
+    if not access_token:
+        print("[WARNING] KITE_ACCESS_TOKEN missing, triggering auto-generation...")
+        new_token = _try_auto_refresh_token()
+        return bool(new_token)
+    
+    # Case 2: Token exists - validate it
+    if api_key and access_token:
+        print("[INFO] Validating existing access token...")
+        if _validate_token_via_api(api_key, access_token):
+            print("[OK] Access token is valid")
+            return True
+        else:
+            print("[WARNING] Access token is EXPIRED or INVALID, attempting auto-refresh...")
+            new_token = _try_auto_refresh_token()
+            return bool(new_token)
+    
     return False
 
 # Try to initialize credentials before importing other modules
@@ -256,18 +302,30 @@ async def setup_websocket_subscriptions():
         print(f"   - Next: {len(next_contracts)}")
         print(f"   - Far: {len(far_contracts)}")
         
-        # Start WebSocket
+        # If token is invalid, try auto-refresh before starting WebSocket
+        if not ws_manager.validate_token():
+            print("[WARNING] Token invalid before WebSocket start, attempting HTTP refresh...")
+            new_token = _try_auto_refresh_token()
+            if new_token:
+                ws_manager.update_token(new_token)
+                print("[OK] Token refreshed, proceeding with WebSocket")
+            else:
+                print("[ERROR] Token refresh failed! WebSocket cannot connect.")
+                print("[ERROR] Run 'python refresh_token.py' to generate a new token")
+                return
+        
+        # Start WebSocket (skips validation since we already validated above)
         ws_manager.start()
-        await asyncio.sleep(2)  # Wait for connection
+        await asyncio.sleep(3)  # Wait for connection
         
-        # Subscribe to all tokens
-        print(f"📡 Subscribing to {len(all_tokens)} instruments via WebSocket...")
-        ws_manager.subscribe(all_tokens)
+        # Subscribe to all tokens in batches
+        print(f"[WS] Subscribing to {len(all_tokens)} instruments via WebSocket (batched)...")
+        ws_manager.subscribe_batched(all_tokens)
         
-        print("✅ WebSocket subscriptions active - receiving real-time ticks")
+        print("[OK] WebSocket subscriptions active - receiving real-time ticks")
         
     except Exception as e:
-        print(f"❌ Error setting up WebSocket: {e}")
+        print(f"[ERROR] Error setting up WebSocket: {e}")
         import traceback
         traceback.print_exc()
 
@@ -350,12 +408,12 @@ async def update_cache_from_websocket():
             cache.update("far", far_data)
             
             if len(tick_data) > 0:
-                print(f"📊 Updated cache at {datetime.now().strftime('%H:%M:%S')} - Live: {len(current_data)}, Near: {len(near_data)}, Next: {len(next_data)}, Far: {len(far_data)}")
+                print(f"[STATS] Updated cache at {datetime.now().strftime('%H:%M:%S')} - Live: {len(current_data)}, Near: {len(near_data)}, Next: {len(next_data)}, Far: {len(far_data)}")
             
-            await asyncio.sleep(0.5)  # Update cache every 0.5 seconds
+            await asyncio.sleep(0.1)  # Update cache every 100ms for algo trading
             
         except Exception as e:
-            print(f"⚠️ Error updating cache: {e}")
+            print(f"[WARN] Error updating cache: {e}")
             await asyncio.sleep(1)
 
 # Background task to update equity bid/ask via HTTP
@@ -369,7 +427,7 @@ async def update_equity_depth_http():
     while True:
         try:
             # Fetch equity data with depth via HTTP
-            print("🔍 Fetching equity bid/ask via HTTP...")
+            print("[SEARCH] Fetching equity bid/ask via HTTP...")
             equity_data = await asyncio.to_thread(
                 live_data_fetcher.fetch_live_data_http, 
                 use_ltp_only=False,  # Get full quote with depth
@@ -387,12 +445,12 @@ async def update_equity_depth_http():
                         # New entry from HTTP
                         cache.current_data[symbol] = data
                 
-                print(f"✅ Updated bid/ask for {len(equity_data)} equity instruments")
+                print(f"[OK] Updated bid/ask for {len(equity_data)} equity instruments")
             
             await asyncio.sleep(10)  # Update depth every 10 seconds
             
         except Exception as e:
-            print(f"⚠️ Error updating equity depth: {e}")
+            print(f"[WARN] Error updating equity depth: {e}")
             await asyncio.sleep(10)
 
 # HTTP Fallback - fetches data via HTTP if WebSocket fails
@@ -408,7 +466,7 @@ async def http_fallback_fetcher():
             
             if not ws_connected:
                 http_fetch_count += 1
-                print(f"📡 HTTP Fallback fetch #{http_fetch_count} (WebSocket not connected)...")
+                print(f"[INFO] HTTP Fallback fetch #{http_fetch_count} (WebSocket not connected)...")
                 
                 # Fetch live data via HTTP
                 if live_data_fetcher:
@@ -416,7 +474,7 @@ async def http_fallback_fetcher():
                     if live_data:
                         for symbol, data in live_data.items():
                             cache.current_data[symbol] = data
-                        print(f"✅ HTTP fallback updated {len(live_data)} instruments")
+                        print(f"[OK] HTTP fallback updated {len(live_data)} instruments")
                 
                 # Fetch futures via HTTP
                 if futures_aggregator:
@@ -439,27 +497,27 @@ async def http_fallback_fetcher():
                                 'contract_info': contract
                             }
                         cache.update(category, category_data)
-                        print(f"✅ HTTP fallback updated {len(category_data)} {category} contracts")
+                        print(f"[OK] HTTP fallback updated {len(category_data)} {category} contracts")
                 
-                print(f"📊 Cache status: Live={len(cache.current_data)}, Near={len(cache.near_data)}, Next={len(cache.next_data)}, Far={len(cache.far_data)}")
+                print(f"[STATS] Cache status: Live={len(cache.current_data)}, Near={len(cache.near_data)}, Next={len(cache.next_data)}, Far={len(cache.far_data)}")
             
             await asyncio.sleep(15)  # Check every 15 seconds
             
         except Exception as e:
-            print(f"⚠️ Error in HTTP fallback: {e}")
+            print(f"[WARN] Error in HTTP fallback: {e}")
             await asyncio.sleep(15)
 
 @app.on_event("startup")
 async def startup_event():
     """Start WebSocket and background tasks"""
-    print("🚀 Starting API...")
+    print("[STARTUP] Starting API...")
     try:
         # Log credential status
         api_key, access_token = get_api_credentials()
         if api_key and access_token:
-            print(f"✅ Credentials loaded - API_KEY: {api_key[:8]}... ACCESS_TOKEN: {access_token[:8]}...")
+            print(f"[OK] Credentials loaded - API_KEY: {api_key[:8]}... ACCESS_TOKEN: {access_token[:8]}...")
         else:
-            print("❌ WARNING: Missing credentials!")
+            print("[ERROR] WARNING: Missing credentials!")
         
         # Setup WebSocket subscriptions
         asyncio.create_task(setup_websocket_subscriptions())
@@ -474,12 +532,12 @@ async def startup_event():
         # Start HTTP fallback data fetcher if WebSocket fails
         asyncio.create_task(http_fallback_fetcher())
         
-        print("✅ API ready - WebSocket streaming active")
-        print("⚡ Real-time data streaming started")
-        print("📊 Equity bid/ask will update via HTTP every 10 seconds")
+        print("[OK] API ready - WebSocket streaming active")
+        print("[FAST] Real-time data streaming started")
+        print("[STATS] Equity bid/ask will update via HTTP every 10 seconds")
     except Exception as e:
-        print(f"⚠️ Error starting WebSocket: {e}")
-        print("🚨 API will still respond but data may be empty initially")
+        print(f"[WARN] Error starting WebSocket: {e}")
+        print("[ALERT] API will still respond but data may be empty initially")
 
 # REST API endpoints
 @app.get("/api/all-futures-combined")
@@ -513,7 +571,7 @@ async def get_all_futures():
             "status": "ready" if len(near_data) > 0 else "loading"
         }
     except Exception as e:
-        print(f"❌ Error in get_all_futures: {e}")
+        print(f"[ERROR] Error in get_all_futures: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -585,7 +643,7 @@ async def stream_futures():
                     "timestamp": all_data["timestamp"]
                 })
                 yield f"data: {data_json}\n\n"
-                await asyncio.sleep(0.5)  # Stream every 0.5 seconds
+                await asyncio.sleep(0.1)  # Stream every 100ms for algo trading
             except Exception as e:
                 yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
                 await asyncio.sleep(2)

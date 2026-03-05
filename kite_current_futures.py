@@ -31,9 +31,9 @@ class KiteCurrentFutures:
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
-        print(f"🔑 Initialized Current Futures API with key: {api_key[:10]}...")
+        print(f"[*] Initialized Current Futures API with key: {api_key[:10]}...")
         if ws_manager:
-            print("🔌 WebSocket mode enabled - will use real-time tick data")
+            print("[+] WebSocket mode enabled - will use real-time tick data")
     
     def clear_screen(self):
         """Clear terminal screen"""
@@ -63,7 +63,7 @@ class KiteCurrentFutures:
             instruments_data = self._rate_limited_request(self.kite.instruments, exchange)
             
             if not instruments_data or 'data' not in instruments_data:
-                print("❌ No instruments data available")
+                print("[-] No instruments data available")
                 return []
             
             instruments = instruments_data['data']
@@ -136,7 +136,7 @@ class KiteCurrentFutures:
             return current_contracts
             
         except Exception as e:
-            print(f"❌ Error fetching current futures contracts: {e}")
+            print(f"[-] Error fetching current futures contracts: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -159,7 +159,7 @@ class KiteCurrentFutures:
     def fetch_live_data_from_websocket(self):
         """Get live data from WebSocket manager (real-time ticks)"""
         if not self.ws_manager:
-            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            print("[!] WebSocket manager not available - use HTTP fallback")
             return self.fetch_live_data_http()
         
         try:
@@ -202,7 +202,7 @@ class KiteCurrentFutures:
             return live_data
             
         except Exception as e:
-            print(f"❌ Error getting WebSocket data: {e}")
+            print(f"[-] Error getting WebSocket data: {e}")
             return {}
     
     def fetch_live_data_http(self, use_ltp_only=True, limit_contracts=None):
@@ -214,7 +214,7 @@ class KiteCurrentFutures:
                 contracts = contracts[:limit_contracts]
             
             if not contracts:
-                print("❌ No current futures contracts available")
+                print("[-] No current futures contracts available")
                 return {}
             
             print(f"📈 Fetching live data for {len(contracts)} current futures via HTTP...")
@@ -271,7 +271,7 @@ class KiteCurrentFutures:
                                     }
                 
                 except Exception as e:
-                    print(f"⚠️ Error fetching batch {i//batch_size + 1}: {e}")
+                    print(f"[!] Error fetching batch {i//batch_size + 1}: {e}")
                     continue
             
             with self.data_lock:
@@ -281,7 +281,7 @@ class KiteCurrentFutures:
             return live_data
             
         except Exception as e:
-            print(f"❌ Error fetching live data: {e}")
+            print(f"[-] Error fetching live data: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -301,7 +301,7 @@ class KiteCurrentFutures:
     def display_live_data(self, limit=20):
         """Display live data in terminal"""
         if not self.live_data:
-            print("❌ No live data available")
+            print("[-] No live data available")
             return
         
         self.clear_screen()
@@ -341,23 +341,28 @@ class KiteCurrentFutures:
 def main():
     """Main function to run current futures fetcher"""
     try:
-        # Load configuration
-        config_file = "kite_config_hf.py"
-        if os.path.exists(config_file):
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("config", config_file)
-            config = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(config)
-            
-            api_key = config.API_KEY
-            access_token = config.ACCESS_TOKEN
-        else:
-            # Fallback to environment variables
+        # Try config files in order of priority
+        api_key = None
+        access_token = None
+        
+        # First try kite_config.py (with .env support)
+        try:
+            import kite_config
+            api_key = kite_config.API_KEY
+            access_token = kite_config.ACCESS_TOKEN
+        except ImportError:
+            pass
+        
+        # Fallback to environment variables
+        if not api_key:
             api_key = os.getenv('KITE_API_KEY')
+        if not access_token:
             access_token = os.getenv('KITE_ACCESS_TOKEN')
         
         if not api_key or not access_token:
-            print("❌ Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
+            print("ERROR: Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
+            print("Set them in .env file or as environment variables")
+            print(f"Current API_KEY: {api_key}")
             return
         
         # Initialize current futures fetcher

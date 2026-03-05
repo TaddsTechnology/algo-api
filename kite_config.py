@@ -10,6 +10,10 @@
 
 import os
 
+# Load .env file for local development
+from dotenv import load_dotenv
+load_dotenv()
+
 # Read from environment variables
 API_KEY = os.getenv('KITE_API_KEY', '')
 API_SECRET = os.getenv('KITE_API_SECRET', '')
@@ -19,6 +23,5 @@ TOTP_SECRET = os.getenv('KITE_TOTP_SECRET', '')
 ACCESS_TOKEN = os.getenv('KITE_ACCESS_TOKEN', '')
 
 # Validation - only warn if running locally without environment setup
-import os
 if not os.environ.get('KITE_API_KEY'):
     print("⚠️ TIP: Set KITE_API_KEY in environment variables for production")

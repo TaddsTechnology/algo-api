@@ -64,6 +64,14 @@ class LightweightKiteTokenManager:
         self.token_expiry = None
         self.token_file = os.path.join(os.path.dirname(__file__), '..', 'kite_token_cache.json')
         
+        # Force token refresh on init - delete any cached token
+        if os.path.exists(self.token_file):
+            try:
+                os.remove(self.token_file)
+                logger.info("Removed cached token file - will generate fresh token")
+            except Exception as e:
+                logger.warning(f"Could not remove token cache: {e}")
+        
         # Initialize
         self._load_token_from_file()
     
