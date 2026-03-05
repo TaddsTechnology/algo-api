@@ -1,14 +1,24 @@
 # Kite API Configuration
-API_KEY = "kixivzzxm7rgxqv2"
-API_SECRET = "8nldqnuafjd3f3ddee150djpali4uupi"
-USER_ID = "NFY104"
-PASSWORD = "Kandarp@1234"
+# IMPORTANT: These values should be set via environment variables for security
+# Set these in your HuggingFace Space secrets:
+# - KITE_API_KEY
+# - KITE_API_SECRET
+# - KITE_USER_ID
+# - KITE_PASSWORD
+# - KITE_TOTP_SECRET
+# - KITE_ACCESS_TOKEN
 
-# TOTP Secret for automatic 2FA
-TOTP_SECRET = "SV4FAGXVEHDZ6X4KO4JA3P2JL6SCSDIU"
+import os
 
-# Comment out static PIN since using TOTP
-# PIN = "your_static_pin_here"
+# Read from environment variables
+API_KEY = os.getenv('KITE_API_KEY', '')
+API_SECRET = os.getenv('KITE_API_SECRET', '')
+USER_ID = os.getenv('KITE_USER_ID', '')
+PASSWORD = os.getenv('KITE_PASSWORD', '')
+TOTP_SECRET = os.getenv('KITE_TOTP_SECRET', '')
+ACCESS_TOKEN = os.getenv('KITE_ACCESS_TOKEN', '')
 
-# This will be populated automatically
-ACCESS_TOKEN = "sP0dXR9wCubjYsc2MjneZT2S6B2ft8VX"
+# Validation - only warn if running locally without environment setup
+import os
+if not os.environ.get('KITE_API_KEY'):
+    print("⚠️ TIP: Set KITE_API_KEY in environment variables for production")
