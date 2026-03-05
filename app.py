@@ -41,15 +41,15 @@ def main():
             missing_vars.append(var)
     
     if missing_vars:
-        print("⚠️ WARNING: Missing environment variables:")
+        print("[WARN] WARNING: Missing environment variables:")
         for var in missing_vars:
             print(f"   - {var}")
-        print("\n💡 Please set these in your Hugging Face Space settings")
+        print("\n[TIP] Please set these in your Hugging Face Space settings")
         print("   or in your kite_config_hf.py file")
     else:
-        print("✅ All required environment variables found")
+        print("[OK] All required environment variables found")
     
-    print("\n🔄 Starting background data fetchers...")
+    print("\n[START] Starting background data fetchers...")
     
     # Run the FastAPI application
     uvicorn.run(

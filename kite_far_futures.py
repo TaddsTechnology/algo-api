@@ -327,7 +327,7 @@ class KiteFarFutures:
             change_pct = data.get('change_pct', 0)
             
             # Color coding for change
-            change_color = "[OPEN]" if change > 0 else "[CLOSED]" if change < 0 else "⚪"
+            change_color = "[OPEN]" if change > 0 else "[CLOSED]" if change < 0 else "-"
             
             print(f"{symbol:<20} {data.get('ltp', 0):<10.2f} "
                   f"{change_color} {change:<8.2f} "

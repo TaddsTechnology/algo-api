@@ -31,9 +31,9 @@ class KiteNearFutures:
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
-        print(f"🔑 Initialized Near Futures API with key: {api_key[:10]}...")
+        print(f"[INFO] Initialized Near Futures API with key: {api_key[:10]}...")
         if ws_manager:
-            print("🔌 WebSocket mode enabled - will use real-time tick data")
+            print("[WS] WebSocket mode enabled - will use real-time tick data")
     
     def clear_screen(self):
         """Clear terminal screen"""
@@ -59,15 +59,15 @@ class KiteNearFutures:
             if self.near_contracts:
                 return self.near_contracts
             
-            print(f"🔍 Fetching NEAR futures contracts from exchange: {exchange}")
+            print(f"[INFO] Fetching NEAR futures contracts from exchange: {exchange}")
             instruments_data = self._rate_limited_request(self.kite.instruments, exchange)
             
             if not instruments_data or 'data' not in instruments_data:
-                print("❌ No instruments data available")
+                print("[ERROR] No instruments data available")
                 return []
             
             instruments = instruments_data['data']
-            print(f"📊 Processing {len(instruments)} instruments for near futures...")
+            print(f"[DATA] Processing {len(instruments)} instruments for near futures...")
             
             current_date = datetime.now()
             near_contracts = []
@@ -130,13 +130,13 @@ class KiteNearFutures:
             # Sort by popularity first, then by symbol
             near_contracts.sort(key=lambda x: (not x['is_popular'], x['symbol']))
             
-            print(f"✅ Found {len(near_contracts)} near futures contracts")
+            print(f"[OK] Found {len(near_contracts)} near futures contracts")
             
             self.near_contracts = near_contracts
             return near_contracts
             
         except Exception as e:
-            print(f"❌ Error fetching near futures contracts: {e}")
+            print(f"[ERROR] Error fetching near futures contracts: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -159,7 +159,7 @@ class KiteNearFutures:
     def fetch_live_data_from_websocket(self):
         """Get live data from WebSocket manager (real-time ticks)"""
         if not self.ws_manager:
-            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            print("[WARN] WebSocket manager not available - use HTTP fallback")
             return self.fetch_live_data_http()
         
         try:
@@ -202,7 +202,7 @@ class KiteNearFutures:
             return live_data
             
         except Exception as e:
-            print(f"❌ Error getting WebSocket data: {e}")
+            print(f"[ERROR] Error getting WebSocket data: {e}")
             return {}
     
     def fetch_live_data_http(self, use_ltp_only=True, limit_contracts=None):
@@ -214,10 +214,10 @@ class KiteNearFutures:
                 contracts = contracts[:limit_contracts]
             
             if not contracts:
-                print("❌ No near futures contracts available")
+                print("[ERROR] No near futures contracts available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(contracts)} near futures via HTTP...")
+            print(f"[INFO] Fetching live data for {len(contracts)} near futures via HTTP...")
             
             symbols = []
             symbol_to_contract = {}
@@ -271,17 +271,17 @@ class KiteNearFutures:
                                     }
                 
                 except Exception as e:
-                    print(f"⚠️ Error fetching batch {i//batch_size + 1}: {e}")
+                    print(f"[WARN] Error fetching batch {i//batch_size + 1}: {e}")
                     continue
             
             with self.data_lock:
                 self.live_data = live_data
             
-            print(f"✅ Successfully fetched data for {len(live_data)} near futures")
+            print(f"[OK] Successfully fetched data for {len(live_data)} near futures")
             return live_data
             
         except Exception as e:
-            print(f"❌ Error fetching live data: {e}")
+            print(f"[ERROR] Error fetching live data: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -301,13 +301,13 @@ class KiteNearFutures:
     def display_live_data(self, limit=20):
         """Display live data in terminal"""
         if not self.live_data:
-            print("❌ No live data available")
+            print("[ERROR] No live data available")
             return
         
         self.clear_screen()
         print("=" * 120)
-        print(f"🔄 NEAR FUTURES LIVE DATA - {datetime.now().strftime('%H:%M:%S')}")
-        print(f"📊 Market Status: {'🟢 OPEN' if self.is_market_open() else '🔴 CLOSED'}")
+        print(f"[UPDATE] NEAR FUTURES LIVE DATA - {datetime.now().strftime('%H:%M:%S')}")
+        print(f"[DATA] Market Status: {'OPEN' if self.is_market_open() else 'CLOSED'}")
         print("=" * 120)
         
         # Header with all fields
@@ -321,7 +321,7 @@ class KiteNearFutures:
             change_pct = data.get('change_pct', 0)
             
             # Color coding for change
-            change_color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+            change_color = "OPEN" if change > 0 else "CLOSED" if change < 0 else "-"
             
             print(f"{symbol:<20} {data.get('ltp', 0):<10.2f} "
                   f"{change_color} {change:<8.2f} "
@@ -335,7 +335,7 @@ class KiteNearFutures:
             count += 1
         
         print("-" * 120)
-        print(f"📈 Showing {count} of {len(self.live_data)} near futures contracts")
+        print(f"[INFO] Showing {count} of {len(self.live_data)} near futures contracts")
         print("=" * 120)
 
 def main():
@@ -357,7 +357,7 @@ def main():
             access_token = os.getenv('KITE_ACCESS_TOKEN')
         
         if not api_key or not access_token:
-            print("❌ Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
+            print("[ERROR] Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
             return
         
         # Initialize near futures fetcher
@@ -378,14 +378,14 @@ def main():
                 time.sleep(2)  # Refresh every 2 seconds
                 
             except KeyboardInterrupt:
-                print("\n👋 Stopping near futures feed...")
+                print("\n[BYE] Stopping near futures feed...")
                 break
             except Exception as e:
-                print(f"❌ Error in main loop: {e}")
+                print(f"[ERROR] Error in main loop: {e}")
                 time.sleep(5)
     
     except Exception as e:
-        print(f"❌ Failed to start near futures fetcher: {e}")
+        print(f"[ERROR] Failed to start near futures fetcher: {e}")
         import traceback
         traceback.print_exc()
 

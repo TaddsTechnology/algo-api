@@ -28,33 +28,33 @@ class KiteLiveData:
         self.min_request_interval = 0.1
         self.request_lock = threading.Lock()
         
-        print(f"🔑 Initialized Live Data API with key: {api_key[:10]}...")
+        print(f"[INFO] Initialized Live Data API with key: {api_key[:10]}...")
         if ws_manager:
-            print("🔌 WebSocket mode enabled - will use real-time tick data")
+            print("[WS] WebSocket mode enabled - will use real-time tick data")
         
         # Pre-fetch instruments at startup for instant access
-        print("🚀 Pre-loading instruments for instant access...")
+        print("[INFO] Pre-loading instruments for instant access...")
         self.get_equity_instruments()
-        print(f"✅ Ready with {len(self.instruments)} instruments")
+        print(f"[OK] Ready with {len(self.instruments)} instruments")
     
     def get_equity_instruments(self, exchange="NFO"):
         """Get equity instruments that have futures contracts"""
         try:
             if self.instruments:
-                print(f"✅ Using cached {len(self.instruments)} instruments with futures")
+                print(f"[OK] Using cached {len(self.instruments)} instruments with futures")
                 return self.instruments
             
-            print(f"🔍 Fetching instruments with futures from exchange: {exchange}")
+            print(f"[INFO] Fetching instruments with futures from exchange: {exchange}")
             
             # Get futures contracts from NFO
             instruments_data = self.kite.instruments(exchange)
             
             if not instruments_data or 'data' not in instruments_data:
-                print("❌ No instruments data available")
+                print("[ERROR] No instruments data available")
                 return []
             
             all_instruments = instruments_data['data']
-            print(f"📊 Processing {len(all_instruments)} instruments...")
+            print(f"[DATA] Processing {len(all_instruments)} instruments...")
             
             # Popular symbols for prioritization
             popular_symbols = [
@@ -78,10 +78,10 @@ class KiteLiveData:
                 except Exception:
                     continue
             
-            print(f"📊 Found {len(underlying_symbols)} unique underlying symbols with futures")
+            print(f"[DATA] Found {len(underlying_symbols)} unique underlying symbols with futures")
             
             # Now fetch NSE instruments (both equity and indices)
-            print("🔍 Fetching NSE instruments for instrument tokens...")
+            print("[INFO] Fetching NSE instruments for instrument tokens...")
             nse_instruments_data = self.kite.instruments('NSE')
             
             # Map symbol to instrument token (both EQ and INDEX)
@@ -99,7 +99,7 @@ class KiteLiveData:
                     except Exception:
                         continue
             
-            print(f"✅ Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
+            print(f"[OK] Mapped {len(symbol_to_token)} NSE instrument tokens (EQ + INDEX)")
             
             # Debug: Print index symbols found in NSE
             index_keys = [k for k in symbol_to_token.keys() if any(x in k for x in ['NIFTY', 'BANK', 'FIN', 'SENSEX', 'MID', 'NEXT'])]
@@ -148,12 +148,12 @@ class KiteLiveData:
             # Sort by popularity first, then by symbol
             equity_instruments.sort(key=lambda x: (not x['is_popular'], x['symbol']))
             
-            print(f"✅ Ready with {len(equity_instruments)} instruments (stocks with futures)")
+            print(f"[OK] Ready with {len(equity_instruments)} instruments (stocks with futures)")
             self.instruments = equity_instruments
             return equity_instruments
             
         except Exception as e:
-            print(f"❌ Error fetching instruments: {e}")
+            print(f"[ERROR] Error fetching instruments: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -176,7 +176,7 @@ class KiteLiveData:
     def fetch_live_data_from_websocket(self):
         """Get live data from WebSocket manager (real-time ticks)"""
         if not self.ws_manager:
-            print("⚠️ WebSocket manager not available - use HTTP fallback")
+            print("[WARN] WebSocket manager not available - use HTTP fallback")
             return self.fetch_live_data_http()
         
         try:
@@ -225,7 +225,7 @@ class KiteLiveData:
             return live_data
             
         except Exception as e:
-            print(f"❌ Error getting WebSocket data: {e}")
+            print(f"[ERROR] Error getting WebSocket data: {e}")
             return {}
     
     def fetch_live_data_http(self, use_ltp_only=True, limit_symbols=None):
@@ -237,10 +237,10 @@ class KiteLiveData:
                 instruments = instruments[:limit_symbols]
             
             if not instruments:
-                print("❌ No instruments available")
+                print("[ERROR] No instruments available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(instruments)} equity instruments via HTTP...")
+            print(f"[INFO] Fetching live data for {len(instruments)} equity instruments via HTTP...")
             
             symbols = []
             symbol_to_instrument = {}
@@ -252,7 +252,7 @@ class KiteLiveData:
             
             # Debug: print first few symbols
             if symbols:
-                print(f"🔍 Sample symbols: {symbols[:5]}")
+                print(f"[INFO] Sample symbols: {symbols[:5]}")
             
             live_data = {}
             batch_size = 20
@@ -305,17 +305,17 @@ class KiteLiveData:
                                     }
                 
                 except Exception as e:
-                    print(f"⚠️ Error fetching batch {i//batch_size + 1}: {e}")
+                    print(f"[WARN] Error fetching batch {i//batch_size + 1}: {e}")
                     continue
             
             with self.data_lock:
                 self.live_data = live_data
             
-            print(f"✅ Successfully fetched data for {len(live_data)} equity instruments")
+            print(f"[OK] Successfully fetched data for {len(live_data)} equity instruments")
             return live_data
             
         except Exception as e:
-            print(f"❌ Error fetching live data: {e}")
+            print(f"[ERROR] Error fetching live data: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -348,7 +348,7 @@ def main():
             access_token = os.getenv('KITE_ACCESS_TOKEN')
         
         if not api_key or not access_token:
-            print("❌ Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
+            print("[ERROR] Please set KITE_API_KEY and KITE_ACCESS_TOKEN")
             return
         
         live_data = KiteLiveData(api_key, access_token)
@@ -363,12 +363,12 @@ def main():
         for symbol, info in list(data.items())[:20]:
             change = info.get('change', 0)
             change_pct = info.get('change_pct', 0)
-            color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+            color = "OPEN" if change > 0 else "CLOSED" if change < 0 else "-"
             
             print(f"{symbol:<15} {info.get('ltp', 0):<10.2f} {info.get('bid', 0):<10.2f} {info.get('ask', 0):<10.2f} {color} {change:<8.2f} {change_pct:<9.2f}% {info.get('volume', 0):<12}")
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         import traceback
         traceback.print_exc()
 

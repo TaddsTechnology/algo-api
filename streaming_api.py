@@ -203,8 +203,19 @@ token_to_symbol = {}      # Maps instrument_token -> symbol
 try:
     api_key, access_token = get_api_credentials()
     if api_key and access_token:
-        # Check if WebSocket should be disabled (for environments where WS fails)
+        # Check if WebSocket should be disabled
+        # Disable on HuggingFace Spaces as outbound WS may be blocked
         enable_ws = os.getenv('ENABLE_WEBSOCKET', 'true').lower() == 'true'
+        
+        # Force HTTP mode for HuggingFace Spaces (WS is blocked on HF)
+        if os.getenv('SPACE_ID') or os.getenv('HF_SPACE'):
+            enable_ws = False
+            print("INFO: Running on HuggingFace Spaces - using HTTP fallback mode")
+        
+        # Force WebSocket ON for Render.com (allows outbound WebSocket)
+        if os.getenv('RENDER'):
+            enable_ws = True
+            print("INFO: Running on Render.com - WebSocket enabled")
         
         # Initialize WebSocket manager
         ws_manager = KiteWebSocketManager(api_key, access_token, enable_websocket=enable_ws)
@@ -302,21 +313,20 @@ async def setup_websocket_subscriptions():
         print(f"   - Next: {len(next_contracts)}")
         print(f"   - Far: {len(far_contracts)}")
         
-        # If token is invalid, try auto-refresh before starting WebSocket
-        if not ws_manager.validate_token():
-            print("[WARNING] Token invalid before WebSocket start, attempting HTTP refresh...")
-            new_token = _try_auto_refresh_token()
-            if new_token:
-                ws_manager.update_token(new_token)
-                print("[OK] Token refreshed, proceeding with WebSocket")
-            else:
-                print("[ERROR] Token refresh failed! WebSocket cannot connect.")
-                print("[ERROR] Run 'python refresh_token.py' to generate a new token")
-                return
-        
-        # Start WebSocket (skips validation since we already validated above)
+        # Start WebSocket
         ws_manager.start()
-        await asyncio.sleep(3)  # Wait for connection
+        
+        # Wait for WebSocket to actually connect (with timeout)
+        print("[WS] Waiting for WebSocket connection...")
+        for _ in range(30):  # Wait up to 30 seconds
+            await asyncio.sleep(1)
+            if ws_manager.is_connected:
+                print("[OK] WebSocket connected")
+                break
+        
+        if not ws_manager.is_connected:
+            print("[ERROR] WebSocket failed to connect")
+            return
         
         # Subscribe to all tokens in batches
         print(f"[WS] Subscribing to {len(all_tokens)} instruments via WebSocket (batched)...")
@@ -507,6 +517,66 @@ async def http_fallback_fetcher():
             print(f"[WARN] Error in HTTP fallback: {e}")
             await asyncio.sleep(15)
 
+
+# Token refresh and WebSocket reconnection task
+async def token_refresh_and_reconnect():
+    """Background task to validate token periodically and reconnect WebSocket if needed"""
+    await asyncio.sleep(60)  # Wait 1 minute before first check
+    
+    refresh_interval = int(os.getenv('TOKEN_REFRESH_INTERVAL', '3600'))  # Default: 1 hour
+    print(f"[TOKEN] Token refresh scheduler started (interval: {refresh_interval}s)")
+    
+    while True:
+        try:
+            api_key = os.getenv('KITE_API_KEY', '')
+            access_token = os.getenv('KITE_ACCESS_TOKEN', '')
+            
+            if not api_key or not access_token:
+                print("[TOKEN] No credentials to validate")
+                await asyncio.sleep(refresh_interval)
+                continue
+            
+            # Validate current token
+            is_valid = _validate_token_via_api(api_key, access_token)
+            
+            if not is_valid:
+                print("[TOKEN] Token expired, attempting auto-refresh...")
+                new_token = _try_auto_refresh_token()
+                
+                if new_token:
+                    print("[TOKEN] Token refreshed successfully, reconnecting WebSocket...")
+                    
+                    # Update WebSocket manager with new token
+                    if ws_manager:
+                        ws_manager.update_token(new_token)
+                        
+                        # Stop current WebSocket if connected
+                        if ws_manager.is_connected:
+                            ws_manager.stop()
+                            await asyncio.sleep(2)
+                        
+                        # Restart WebSocket with new token
+                        ws_manager.start()
+                        await asyncio.sleep(5)
+                        
+                        # Re-subscribe to instruments
+                        if token_to_contract:
+                            all_tokens = list(token_to_contract.keys())
+                            ws_manager.subscribe_batched(all_tokens)
+                            print(f"[TOKEN] WebSocket reconnected with {len(all_tokens)} subscriptions")
+                    
+                    print("[TOKEN] Token refresh and WebSocket reconnection complete")
+                else:
+                    print("[TOKEN] Token refresh failed! Will retry in next cycle")
+            else:
+                print(f"[TOKEN] Token valid, next check in {refresh_interval}s")
+            
+            await asyncio.sleep(refresh_interval)
+            
+        except Exception as e:
+            print(f"[TOKEN] Error in token refresh task: {e}")
+            await asyncio.sleep(refresh_interval)
+
 @app.on_event("startup")
 async def startup_event():
     """Start WebSocket and background tasks"""
@@ -531,6 +601,9 @@ async def startup_event():
         
         # Start HTTP fallback data fetcher if WebSocket fails
         asyncio.create_task(http_fallback_fetcher())
+        
+        # Start token refresh and WebSocket reconnection scheduler
+        asyncio.create_task(token_refresh_and_reconnect())
         
         print("[OK] API ready - WebSocket streaming active")
         print("[FAST] Real-time data streaming started")
@@ -722,11 +795,18 @@ async def retry_websocket():
         return {"success": False, "error": "WebSocket manager not initialized"}
     
     try:
+        # Stop existing connection if any
+        if ws_manager.is_connected:
+            ws_manager.stop()
+            await asyncio.sleep(2)
+        
         ws_manager.retry_connection()
-        await asyncio.sleep(3)  # Wait for connection attempt
+        await asyncio.sleep(5)  # Wait for connection attempt
         
         if ws_manager.is_connected:
-            return {"success": True, "message": "WebSocket reconnected successfully"}
+            # Also setup subscriptions after reconnect
+            await setup_websocket_subscriptions()
+            return {"success": True, "message": "WebSocket reconnected and subscriptions restored"}
         else:
             return {
                 "success": False, 

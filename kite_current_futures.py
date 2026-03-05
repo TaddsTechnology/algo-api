@@ -67,7 +67,7 @@ class KiteCurrentFutures:
                 return []
             
             instruments = instruments_data['data']
-            print(f"📊 Processing {len(instruments)} instruments for current futures...")
+            print(f"[DATA] Processing {len(instruments)} instruments for current futures...")
             
             current_date = datetime.now()
             current_contracts = []
@@ -130,7 +130,7 @@ class KiteCurrentFutures:
             # Sort by popularity first, then by symbol
             current_contracts.sort(key=lambda x: (not x['is_popular'], x['symbol']))
             
-            print(f"✅ Found {len(current_contracts)} current futures contracts")
+            print(f"[OK] Found {len(current_contracts)} current futures contracts")
             
             self.current_contracts = current_contracts
             return current_contracts
@@ -217,7 +217,7 @@ class KiteCurrentFutures:
                 print("[-] No current futures contracts available")
                 return {}
             
-            print(f"📈 Fetching live data for {len(contracts)} current futures via HTTP...")
+            print(f"[INFO] Fetching live data for {len(contracts)} current futures via HTTP...")
             
             symbols = []
             symbol_to_contract = {}
@@ -277,7 +277,7 @@ class KiteCurrentFutures:
             with self.data_lock:
                 self.live_data = live_data
             
-            print(f"✅ Successfully fetched data for {len(live_data)} current futures")
+            print(f"[OK] Successfully fetched data for {len(live_data)} current futures")
             return live_data
             
         except Exception as e:
@@ -307,7 +307,7 @@ class KiteCurrentFutures:
         self.clear_screen()
         print("=" * 120)
         print(f"🔥 CURRENT FUTURES LIVE DATA - {datetime.now().strftime('%H:%M:%S')}")
-        print(f"📊 Market Status: {'🟢 OPEN' if self.is_market_open() else '🔴 CLOSED'}")
+        print(f"[DATA] Market Status: {'OPEN' if self.is_market_open() else 'CLOSED'}")
         print("=" * 120)
         
         # Header with all fields
@@ -321,7 +321,7 @@ class KiteCurrentFutures:
             change_pct = data.get('change_pct', 0)
             
             # Color coding for change
-            change_color = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+            change_color = "OPEN" if change > 0 else "CLOSED" if change < 0 else "-"
             
             print(f"{symbol:<20} {data.get('ltp', 0):<10.2f} "
                   f"{change_color} {change:<8.2f} "
@@ -335,7 +335,7 @@ class KiteCurrentFutures:
             count += 1
         
         print("-" * 120)
-        print(f"📈 Showing {count} of {len(self.live_data)} current futures contracts")
+        print(f"[INFO] Showing {count} of {len(self.live_data)} current futures contracts")
         print("=" * 120)
 
 def main():
@@ -368,7 +368,7 @@ def main():
         # Initialize current futures fetcher
         current_futures = KiteCurrentFutures(api_key, access_token)
         
-        print("🚀 Starting Current Futures Live Data Feed...")
+        print("[START] Starting Current Futures Live Data Feed...")
         print("Press Ctrl+C to stop")
         
         while True:
@@ -383,14 +383,14 @@ def main():
                 time.sleep(2)  # Refresh every 2 seconds
                 
             except KeyboardInterrupt:
-                print("\n👋 Stopping current futures feed...")
+                print("\n[BYE] Stopping current futures feed...")
                 break
             except Exception as e:
-                print(f"❌ Error in main loop: {e}")
+                print(f"[ERROR] Error in main loop: {e}")
                 time.sleep(5)
     
     except Exception as e:
-        print(f"❌ Failed to start current futures fetcher: {e}")
+        print(f"[ERROR] Failed to start current futures fetcher: {e}")
         import traceback
         traceback.print_exc()
 

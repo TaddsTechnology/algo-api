@@ -24,4 +24,4 @@ ACCESS_TOKEN = os.getenv('KITE_ACCESS_TOKEN', '')
 
 # Validation - only warn if running locally without environment setup
 if not os.environ.get('KITE_API_KEY'):
-    print("⚠️ TIP: Set KITE_API_KEY in environment variables for production")
+    print("[WARNING] Set KITE_API_KEY in environment variables for production")
