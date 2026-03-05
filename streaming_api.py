@@ -207,10 +207,10 @@ try:
         # Disable on HuggingFace Spaces as outbound WS may be blocked
         enable_ws = os.getenv('ENABLE_WEBSOCKET', 'true').lower() == 'true'
         
-        # Force HTTP mode for HuggingFace Spaces (WS is blocked on HF)
+        # HuggingFace Spaces: Try WebSocket first, fall back to HTTP if needed
         if os.getenv('SPACE_ID') or os.getenv('HF_SPACE'):
-            enable_ws = False
-            print("INFO: Running on HuggingFace Spaces - using HTTP fallback mode")
+            enable_ws = True  # Try WebSocket first
+            print("INFO: HuggingFace detected - trying WebSocket, will use HTTP fallback if needed")
         
         # Force WebSocket ON for Render.com (allows outbound WebSocket)
         if os.getenv('RENDER'):
