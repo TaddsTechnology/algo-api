@@ -16,10 +16,15 @@ logger = logging.getLogger(__name__)
 class KiteWebSocketManager:
     """Manages WebSocket connection for real-time tick data"""
     
-    def __init__(self, api_key, access_token):
+    def __init__(self, api_key, access_token, max_reconnect_attempts=3):
         self.api_key = api_key
         self.access_token = access_token
         self.kws = None
+        
+        # Reconnection settings
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self.reconnect_count = 0
+        self._stop_reconnecting = False
         
         # Data cache - thread-safe
         self.tick_data = {}
@@ -116,7 +121,12 @@ class KiteWebSocketManager:
     def on_noreconnect(self, ws):
         """Callback when max reconnection attempts reached"""
         self.is_connected = False
-        logger.error("❌ Max reconnection attempts reached. WebSocket stopped.")
+        self.reconnect_count += 1
+        if self.reconnect_count >= self.max_reconnect_attempts:
+            self._stop_reconnecting = True
+            logger.error(f"❌ Max reconnection attempts ({self.max_reconnect_attempts}) reached. WebSocket stopped. Use HTTP fallback for data.")
+        else:
+            logger.warning(f"⚠️ Reconnection attempt {self.reconnect_count}/{self.max_reconnect_attempts} failed. Will retry...")
     
     def subscribe(self, instrument_tokens):
         """Subscribe to instruments"""
