@@ -1,6 +1,6 @@
 # Kite API Configuration
 API_KEY = "kixivzzxm7rgxqv2"
-API_SECRET = "clt2qus10wnoes6wm5nq0sl2n1977egv"
+API_SECRET = "8nldqnuafjd3f3ddee150djpali4uupi"
 USER_ID = "NFY104"
 PASSWORD = "Kandarp@1234"
 
