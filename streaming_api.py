@@ -315,6 +315,12 @@ async def setup_websocket_subscriptions():
         
         # Start WebSocket
         ws_manager.start()
+
+        # Log warning if on HF and WebSocket failed
+        if (os.getenv('SPACE_ID') or os.getenv('HF_SPACE')) and ws_manager and not ws_manager.is_connected:
+            print("[WARNING] WebSocket failed on HF Space - Kite likely blocking HF IP range - using HTTP fallback (15s polling)")
+            print("[TIP] For real-time data, use Render.com or a VPS with dedicated IP")
+
         
         # Wait for WebSocket to actually connect (with timeout)
         print("[WS] Waiting for WebSocket connection...")
