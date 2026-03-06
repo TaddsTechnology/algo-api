@@ -99,6 +99,7 @@ from typing import Dict, Any
 import asyncio
 import json
 import time
+import requests
 from datetime import datetime
 
 # Import our specialized futures fetchers
@@ -822,6 +823,15 @@ async def retry_websocket():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+n@app.get("/api/ip")
+async def get_outbound_ip():
+    """Get the outbound IP address of this server (for whitelisting)"""
+    try:
+        response = requests.get("https://api.ipify.org?format=json", timeout=5)
+        ip = response.json().get("ip", "unknown")
+        return {"ip": ip, "message": "This is the IP your HF Space uses for outbound requests. IP may change over time.", "note": "Kite may block shared IP ranges used by cloud platforms. Consider using Render.com for stable IP."}
+    except Exception as e:
+        return {"error": str(e), "ip": "unknown"}
 @app.get("/")
 async def root():
     """Root endpoint with API info"""
