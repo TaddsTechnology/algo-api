@@ -823,7 +823,7 @@ async def retry_websocket():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-n@app.get("/api/ip")
+@app.get("/api/ip")
 async def get_outbound_ip():
     """Get the outbound IP address of this server (for whitelisting)"""
     try:
